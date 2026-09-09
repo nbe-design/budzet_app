@@ -434,6 +434,71 @@ function potForecast(state, pot) {
   return { bal, projected, shortfall, monthsLeft, dueLabel: monthName(pot.nextDue) };
 }
 
+function absDay(month, day) { const { y, m } = parseMk(month); return y * 372 + m * 31 + day; }
+
+/* Sljedeća isplata plaće: ovaj mjesec (ako još nije primljena) ili iduci. */
+function nextPayday(state) {
+  const placa = state.income.recurring.find(r => r.id === 'inc-placa') || state.income.recurring[0];
+  const cur = latestOpenMonth(state);
+  const M = state.months[cur];
+  const entry = M.income.find(i => i.refId === placa.id);
+  const month = (entry && entry.received) ? addMonths(cur, 1) : cur;
+  return { placa, month, day: placa.day };
+}
+
+/* Predviđeno stanje računa točno prije nego sljedeća plaća sjedne — trenutno stanje
+   umanjeno za sve još neplaćene obveze koje dospijevaju do tada. Varijabilno se
+   projicira po GOREM od (plan/dan, stvarni tempo/dan) — ako se već trošI više od
+   plana, projekcija to uzima u obzir umjesto da se drži optimističkog plana. */
+function projectedBeforePayday(state) {
+  const cur = latestOpenMonth(state);
+  const M = state.months[cur];
+  const { placa, month: paydayMonth, day: paydayDay } = nextPayday(state);
+  const paydayAbs = absDay(paydayMonth, paydayDay);
+  const next = addMonths(cur, 1);
+
+  let projected = accountBalance(state);
+
+  // neplaćeni fiksni troškovi do isplate (ovaj mjesec iz M.fixed, iduci iz predloška)
+  for (const f of state.fixedCosts) {
+    for (const month of [cur, next]) {
+      if (!activeInMonth(f, month)) continue;
+      if (absDay(month, f.day) > paydayAbs) continue;
+      if (month === cur) {
+        const fm = M.fixed.find(x => x.refId === f.id);
+        if (fm && fm.paid) continue;
+        projected -= (fm ? (fm.actual ?? fm.planned) : f.amount);
+      } else {
+        projected -= f.amount;
+      }
+    }
+  }
+  // ostali (ne-plaća) prihodi koji još nisu primljeni a dolaze do isplate
+  for (const r of state.income.recurring) {
+    if (r.id === placa.id) continue;
+    if (absDay(cur, r.day) > paydayAbs) continue;
+    const im = M.income.find(x => x.refId === r.id);
+    if (im && !im.received) projected += (im.actual ?? im.planned);
+  }
+  // neplaćeni doprinosi u lonce i godišnji računi ovaj mjesec
+  for (const pc of M.potContribs) if (!pc.paid) projected -= (pc.actual ?? pc.planned);
+  for (const s of M.potSpends) if (!s.done) projected -= s.amount;
+
+  // varijabilno: preostali dani do isplate, po gorem od plan-tempa i stvarnog tempa
+  const dim = daysInMonth(cur);
+  const todayDate = new Date().getDate();
+  const spentVar = sum(M.variable, c => sum(c.entries, e => e.amount));
+  const planVar = sum(M.variable, c => c.plan);
+  const planRate = planVar / dim;
+  const actualRate = todayDate > 0 ? spentVar / todayDate : planRate;
+  const rate = Math.max(planRate, actualRate);
+  const windowEndDay = (paydayMonth === cur) ? Math.min(paydayDay, dim) : dim;
+  const remainingDays = Math.max(0, windowEndDay - todayDate);
+  projected -= Math.round(rate * remainingDays);
+
+  return { amount: projected, paydayMonth, paydayDay };
+}
+
 /* ------------------------------------------------------------------ *
  * Stanje aplikacije / render
  * ------------------------------------------------------------------ */
@@ -523,6 +588,10 @@ function renderDashboard() {
     el('h2', {}, 'Projekcija kraja mjeseca'),
     row('Planirani ostatak', eur(roll.closingPlanned)),
     row('Trenutni (stvarni) ostatak', eur(roll.closingBalance)),
+    (() => { const pb = projectedBeforePayday(state);
+      return row(`Predviđeno stanje prije iduće plaće (${pb.paydayDay}. ${monthName(pb.paydayMonth)})`,
+        eur(pb.amount), 'uzima u obzir trenutni tempo trošenja, ne samo plan');
+    })(),
   ));
 
   // upozorenja

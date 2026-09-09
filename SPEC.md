@@ -251,6 +251,7 @@ Kad se mjesec zatvori, `closingBalance` postaje `openingBalance` idućeg mjeseca
 
 - **Dnevni budžet** = (preostali planirani varijabilni diskrecijski iznos ovog mjeseca) / (preostali dani u mjesecu)
 - **Projekcija kraja mjeseca** = slobodno − (svi preostali planirani odljevi ovog mjeseca: neplaćeni fiksni + preostali plan varijabilnih + neplaćeni doprinosi lonaca + sinking računi koji dospijevaju ovaj mjesec)
+- **Predviđeno stanje prije iduće plaće** (odluka #20) = `accountBalance` − (sve još neplaćene obveze koje dospijevaju do idućeg dana isplate plaće: fiksni troškovi, doprinosi lonaca, godišnji računi, + eventualno drugi neprimljeni prihodi tog razdoblja) − (varijabilno za preostale dane do isplate, po **gorem** od plan-tempa/dan i stvarnog tempa/dan do sada). Ako se već troši više od plana, projekcija to odmah odražava umjesto da se drži optimističnog plana. Isplata = prvi neprimljeni `income.recurring` unos s id `inc-placa` — ako je ovaj mjesec već primljen, gleda se iduci mjesec. Matematički neovisno o TOME kad se nešto plati (samo o UKUPNIM poznatim obvezama/prihodima do tog datuma) — plaćanje danas vs. sutra ne mijenja projekciju, samo prebacuje iznos iz "još treba" u "stvarno stanje".
 - **Upozorenje na manjak lonca**: za svaki sinking lonac, projicirano stanje na `nextDue` = trenutno stanje + (mjeseci do nextDue) × monthly. Ako < targetAmount → crveno, prikaži manjak.
 
 ### Rata lonca — prvi ciklus vs. ustaljeni ciklus (odluka #15)
@@ -459,6 +460,7 @@ prazne — ne stvara se rupa u računu.
 | 17 | Ulaganja (T212) lokacija | Premješteno iz Lonaca (type "savings") u varijabilne kategorije, plan 225 €/mj (2026-09-09). Honorar-investicija se knjiži kao unos u tu kategoriju (ne kao potContrib). Ukupan uloženi iznos kroz vrijeme prikazan u Analizi. Razlog: iznos varira po mjesecu i konceptualno je bliže "varijabilnom" unosu nego fiksnoj rezervaciji. |
 | 18 | Analiza — koje kategorije | "Prosjek po kategoriji" u Analizi prikazuje samo kategorije s `analyze: true` (Život, Gorivo) — Porez na najam (pass-through) i Ulaganja (investicija, ne trošenje) nisu korisne za tu usporedbu, pa su izostavljene (2026-09-09). |
 | 19 | Stvarni vs. planirani iznos | Prihodi i uplate u lonce imaju uređivo polje za stvarni iznos (ne samo checkbox), jer se npr. plaća rijetko poklapa točno s planom (2026-09-09). |
+| 20 | Predviđeno stanje prije plaće | Dodano na Dashboard (2026-09-09): projekcija stanja računa tik prije idućeg primitka plaće, ne kraja kalendarskog mjeseca. Varijabilno se projicira po gorem od plan-tempa i stvarnog tempa trošenja — overspend se odmah odražava u projekciji. |
 
 ---
 
