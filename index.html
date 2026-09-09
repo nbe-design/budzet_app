@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="hr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1b1f24">
+  <title>Budžet</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <button id="btn-month-prev" class="icon-btn" aria-label="Prethodni mjesec">‹</button>
+      <div id="month-label">—</div>
+      <button id="btn-month-next" class="icon-btn" aria-label="Sljedeći mjesec">›</button>
+    </header>
+
+    <main id="view"><!-- renderano iz app.js --></main>
+
+    <nav id="tabbar">
+      <button data-view="dashboard" class="tab is-active">Pregled</button>
+      <button data-view="month" class="tab">Mjesec</button>
+      <button data-view="pots" class="tab">Lonci</button>
+      <button data-view="analysis" class="tab">Analiza</button>
+      <button data-view="settings" class="tab">Postavke</button>
+    </nav>
+  </div>
+
+  <div id="modal-root" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
