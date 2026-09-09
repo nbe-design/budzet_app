@@ -570,19 +570,15 @@ function renderDashboard() {
   );
   wrap.append(freeCard);
 
-  // dnevni budžet (preostali plan varijabilnih diskrecijskih / preostali dani)
-  const spentVar = sum(M.variable, c => sum(c.entries, e => e.amount));
-  const planVar = sum(M.variable, c => c.plan);
-  const leftVar = planVar - spentVar;
-  const dim = daysInMonth(currentMonth);
-  const { y, m } = parseMk(currentMonth);
-  const now = new Date();
-  const isThisMonth = (now.getFullYear() === y && now.getMonth() + 1 === m);
-  const daysLeft = isThisMonth ? Math.max(1, dim - now.getDate() + 1) : dim;
+  // preostalo za "Život" — istaknuto posebno, ovo je Nikolina ključna dnevna stavka
+  const zivot = M.variable.find(c => c.catId === 'var-zivot');
+  const zivotSpent = zivot ? sum(zivot.entries, e => e.amount) : 0;
+  const zivotPlan = zivot ? zivot.plan : 0;
+  const zivotLeft = zivotPlan - zivotSpent;
   wrap.append(el('div', { class: 'card' },
-    el('h2', {}, 'Dnevni budžet (varijabilno)'),
-    el('div', { class: 'big-number ' + (leftVar < 0 ? 'neg' : '') }, eur(Math.round(leftVar / daysLeft))),
-    el('p', { class: 'notice' }, `Ostalo ${eur(leftVar)} varijabilnog plana • ${daysLeft} ${isThisMonth ? 'dana do kraja mjeseca' : 'dana'}`),
+    el('h2', {}, 'Preostalo za "Život"'),
+    el('div', { class: 'big-number ' + (zivotLeft < 0 ? 'neg' : '') }, eur(zivotLeft)),
+    el('p', { class: 'notice' }, `Potrošeno ${eur(zivotSpent)} od plana ${eur(zivotPlan)}`),
   ));
 
   // projekcija kraja mjeseca
