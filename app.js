@@ -167,7 +167,9 @@ const Drive = {
 
   signIn() {
     if (!this.tokenClient) { alert('Google Drive se još učitava — pokušaj opet za par sekundi.'); return; }
-    this.tokenClient.requestAccessToken({ prompt: 'consent' });
+    // bez prompt override — Google prikaže samo što je nužno (ništa ako je pristanak već dan,
+    // inače brzi izbor računa). 'consent' bi forsirao puni ekran svaki put.
+    this.tokenClient.requestAccessToken();
   },
 
   signOut() {
