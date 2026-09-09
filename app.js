@@ -59,7 +59,8 @@ const HR_MONTHS = ['siječanj','veljača','ožujak','travanj','svibanj','lipanj'
   'srpanj','kolovoz','rujan','listopad','studeni','prosinac'];
 
 const uid = () => Math.random().toString(36).slice(2, 10);
-const eur = (c) => (c / 100).toLocaleString('hr-HR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+const eurPlain = (c) => (c / 100).toLocaleString('hr-HR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const eur = (c) => eurPlain(c) + ' €';
 const parseEur = (s) => {
   let str = String(s).trim().replace(/\s/g, '');
   if (str.includes(',')) str = str.replace(/\./g, '').replace(',', '.'); // "1.850,00" (hr format) → "1850.00"
@@ -110,6 +111,29 @@ const Store = {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `budzet-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+  },
+  /* Ravna lista svih stvarnih (actual) transakcija, za pregled u Excelu. ';' delimiter
+     i zarez kao decimalni znak jer je to hr-HR Excel default. */
+  exportCsv(state) {
+    const esc = (s) => { s = String(s ?? ''); return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    const rows = [['Mjesec', 'Datum', 'Tip', 'Naziv', 'Iznos']];
+    for (const m of Object.keys(state.months).sort()) {
+      const M = state.months[m];
+      if (!M.opened) continue;
+      for (const i of M.income) if (i.received) rows.push([m, (i.date || '').slice(0, 10), 'Prihod', i.name, eurPlain(i.actual ?? i.planned)]);
+      for (const h of M.honorari) rows.push([m, (h.date || '').slice(0, 10), 'Honorar', 'Honorar → račun', eurPlain(h.toAccount)]);
+      for (const f of M.fixed) if (f.paid) rows.push([m, (f.date || '').slice(0, 10), 'Fiksni', f.name, '-' + eurPlain(f.actual ?? f.planned)]);
+      for (const c of M.variable) for (const e of c.entries) rows.push([m, (e.date || '').slice(0, 10), 'Varijabilno', `${c.name}: ${e.note || ''}`, '-' + eurPlain(e.amount)]);
+      for (const pc of M.potContribs) if (pc.paid) rows.push([m, '', 'Uplata u lonac', pc.name, '-' + eurPlain(pc.actual ?? pc.planned)]);
+      for (const s of M.potSpends) if (s.done) rows.push([m, (s.date || '').slice(0, 10), 'Godišnji račun', s.name, '-' + eurPlain(s.amount)]);
+      for (const a of M.adjustments) rows.push([m, '', 'Prilagodba', a.note || '', (a.amount >= 0 ? '' : '-') + eurPlain(Math.abs(a.amount))]);
+    }
+    const csv = rows.map(r => r.map(esc).join(';')).join('\r\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `budzet-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
   },
 };
@@ -416,6 +440,7 @@ function potForecast(state, pot) {
 let state = Store.load();
 let currentMonth = latestOpenMonth(state);
 let currentView = 'dashboard';
+let settingsEdit = null; // { section: 'income'|'fixed'|'variable'|'pots', id: string|null } — id null = novi unos
 
 function persist() {
   Store.save(state);
@@ -425,6 +450,7 @@ function persist() {
 function setMonth(m) { currentMonth = m; render(); }
 function setView(v) {
   currentView = v;
+  if (v !== 'settings') settingsEdit = null;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('is-active', t.dataset.view === v));
   render();
 }
@@ -749,27 +775,182 @@ function renderSettings() {
     row('Početno stanje', eur(state.settings.startingBalance)),
     el('div', { class: 'inline-add', style: 'margin-top:10px' },
       el('button', { class: 'ghost', onclick: () => Store.exportJson(state) }, 'Izvezi JSON'),
+      el('button', { class: 'ghost', onclick: () => Store.exportCsv(state) }, 'Izvezi CSV'),
       el('button', { class: 'ghost', onclick: importJson }, 'Uvezi JSON'),
       el('button', { class: 'ghost', onclick: () => { if (confirm('Ovo će TRAJNO izbrisati sve tvoje podatke (sve mjesece, unose, plaćanja) i vratiti app na početne postavke. Ovo se ne može poništiti — ako nisi siguran, prvo napravi "Izvezi JSON". Jesi li siguran da želiš nastaviti?')) { localStorage.removeItem(KEY); location.reload(); } } }, 'Reset'),
     ),
   ));
 
-  wrap.append(listCard('Prihodi (mjesečni)', state.income.recurring.map(r => `${r.name} · ${eur(r.amount)} · ${r.day}. u mj.`)));
-  wrap.append(listCard('Fiksni troškovi', state.fixedCosts.map(f => `${f.name} · ${eur(f.amount)} · ${f.day}. u mj.${f.endMonth ? ' · do ' + f.endMonth : ''}`)));
-  wrap.append(listCard('Varijabilne kategorije', state.variableCategories.map(c => `${c.name} · plan ${eur(c.plan)}`)));
-  wrap.append(listCard('Lonci', state.pots.map(p => `${p.name} · ${eur(p.monthly)}/mj · ${p.type}${p.nextDue ? ' · dospijeće ' + monthName(p.nextDue) : ''}`)));
+  wrap.append(el('p', { class: 'notice' }, 'Promjene ispod utječu na buduće mjesece (već otvoreni mjeseci se ne mijenjaju retroaktivno).'));
 
-  wrap.append(el('p', { class: 'notice' }, 'Uređivanje stavki u postavkama — sljedeća iteracija. Za sad se mijenja kroz Izvoz/Uvoz JSON ili izravno u kodu (SEED).'));
+  wrap.append(renderIncomeSettings());
+  wrap.append(renderFixedSettings());
+  wrap.append(renderVariableSettings());
+  wrap.append(renderPotsSettings());
+
   return wrap;
+}
+
+/* --- generički helperi za uređivanje popisa u Postavkama --- */
+function startEdit(section, id) { settingsEdit = { section, id }; render(); }
+function cancelEdit() { settingsEdit = null; render(); }
+function isEditing(section, id) { return settingsEdit && settingsEdit.section === section && settingsEdit.id === id; }
+function editRow(label, section, id) {
+  return el('div', { class: 'row' },
+    el('span', { class: 'label' }, label),
+    el('span', {},
+      el('button', { class: 'ghost', style: 'padding:2px 8px;margin-right:4px', onclick: () => startEdit(section, id) }, 'Uredi'),
+      el('button', { class: 'ghost', style: 'padding:2px 8px', onclick: () => deleteSettingsItem(section, id) }, 'Obriši')));
+}
+function deleteSettingsItem(section, id) {
+  if (!confirm('Obrisati ovu stavku? Ne utječe na već otvorene mjesece, samo na buduće.')) return;
+  const arr = { income: state.income.recurring, fixed: state.fixedCosts, variable: state.variableCategories, pots: state.pots }[section];
+  const idx = arr.findIndex(x => x.id === id);
+  if (idx >= 0) arr.splice(idx, 1);
+  persist(); render();
+}
+function formCard(...kids) { return el('div', { class: 'card', style: 'background:var(--surface-2);margin-top:8px' }, ...kids); }
+function formActions(onSave) {
+  return el('div', { class: 'actions' },
+    el('button', { class: 'ghost', onclick: cancelEdit }, 'Odustani'),
+    el('button', { class: 'primary', onclick: onSave }, 'Spremi'));
+}
+function field(label, inputEl) { return el('div', { class: 'field' }, el('label', {}, label), inputEl); }
+
+/* --- Prihodi --- */
+function renderIncomeSettings() {
+  const card = el('div', { class: 'card' }, el('h2', {}, 'Prihodi (mjesečni)'));
+  for (const r of state.income.recurring) {
+    card.append(isEditing('income', r.id) ? incomeForm(r) : editRow(`${r.name} · ${eur(r.amount)} · ${r.day}. u mj.`, 'income', r.id));
+  }
+  card.append(isEditing('income', null) ? incomeForm(null) : el('button', { class: 'ghost', onclick: () => startEdit('income', null) }, '+ Dodaj prihod'));
+  return card;
+}
+function incomeForm(r) {
+  const name = el('input', { type: 'text', value: r?.name ?? '', placeholder: 'npr. Plaća' });
+  const amount = el('input', { type: 'text', inputmode: 'decimal', value: r ? eurPlain(r.amount) : '', placeholder: '0,00' });
+  const day = el('input', { type: 'number', min: 1, max: 31, value: r?.day ?? 1 });
+  const save = () => {
+    const n = name.value.trim(), a = parseEur(amount.value), d = Math.min(31, Math.max(1, Number(day.value) || 1));
+    if (!n || !a) return alert('Naziv i iznos su obavezni.');
+    if (r) { r.name = n; r.amount = a; r.day = d; }
+    else state.income.recurring.push({ id: 'inc-' + uid(), name: n, amount: a, day: d });
+    persist(); cancelEdit();
+  };
+  return formCard(field('Naziv', name), field('Iznos (€)', amount), field('Dan u mjesecu', day), formActions(save));
+}
+
+/* --- Fiksni troškovi --- */
+function renderFixedSettings() {
+  const card = el('div', { class: 'card' }, el('h2', {}, 'Fiksni troškovi'));
+  for (const f of state.fixedCosts) {
+    const label = `${f.name} · ${eur(f.amount)} · ${f.day}. u mj.${f.endMonth ? ' · do ' + f.endMonth : ''}${f.recurrence === 'annual' ? ' · godišnje' : ''}`;
+    card.append(isEditing('fixed', f.id) ? fixedForm(f) : editRow(label, 'fixed', f.id));
+  }
+  card.append(isEditing('fixed', null) ? fixedForm(null) : el('button', { class: 'ghost', onclick: () => startEdit('fixed', null) }, '+ Dodaj fiksni trošak'));
+  return card;
+}
+function fixedForm(f) {
+  const name = el('input', { type: 'text', value: f?.name ?? '', placeholder: 'Naziv' });
+  const amount = el('input', { type: 'text', inputmode: 'decimal', value: f ? eurPlain(f.amount) : '', placeholder: '0,00' });
+  const day = el('input', { type: 'number', min: 1, max: 31, value: f?.day ?? 1 });
+  const startMonth = el('input', { type: 'text', value: f?.startMonth ?? '', placeholder: 'YYYY-MM (prazno = odmah)' });
+  const endMonth = el('input', { type: 'text', value: f?.endMonth ?? '', placeholder: 'YYYY-MM (prazno = bez kraja)' });
+  const annual = el('input', { type: 'checkbox' }); annual.checked = f?.recurrence === 'annual';
+  const save = () => {
+    const n = name.value.trim(), a = parseEur(amount.value), d = Math.min(31, Math.max(1, Number(day.value) || 1));
+    const sm = startMonth.value.trim() || null, em = endMonth.value.trim() || null;
+    if (!n || !a) return alert('Naziv i iznos su obavezni.');
+    if (annual.checked && !sm) return alert('Godišnji trošak treba početni mjesec (mjesec/godina prvog dospijeća).');
+    if (f) {
+      f.name = n; f.amount = a; f.day = d; f.startMonth = sm; f.endMonth = em;
+      if (annual.checked) f.recurrence = 'annual'; else delete f.recurrence;
+    } else {
+      const obj = { id: 'fx-' + uid(), name: n, amount: a, day: d, startMonth: sm, endMonth: em };
+      if (annual.checked) obj.recurrence = 'annual';
+      state.fixedCosts.push(obj);
+    }
+    persist(); cancelEdit();
+  };
+  return formCard(
+    field('Naziv', name), field('Iznos (€)', amount), field('Dan u mjesecu', day),
+    field('Početni mjesec', startMonth), field('Završni mjesec', endMonth),
+    el('label', { class: 'checkline' }, annual, el('span', { class: 'label' }, 'Godišnji trošak (ponavlja se jednom godišnje, ne svaki mjesec)')),
+    formActions(save));
+}
+
+/* --- Varijabilne kategorije --- */
+function renderVariableSettings() {
+  const card = el('div', { class: 'card' }, el('h2', {}, 'Varijabilne kategorije'));
+  for (const c of state.variableCategories) {
+    card.append(isEditing('variable', c.id) ? variableForm(c) : editRow(`${c.name} · plan ${eur(c.plan)}${c.analyze ? ' · analizira se' : ''}`, 'variable', c.id));
+  }
+  card.append(isEditing('variable', null) ? variableForm(null) : el('button', { class: 'ghost', onclick: () => startEdit('variable', null) }, '+ Dodaj kategoriju'));
+  return card;
+}
+function variableForm(c) {
+  const name = el('input', { type: 'text', value: c?.name ?? '', placeholder: 'Naziv' });
+  const plan = el('input', { type: 'text', inputmode: 'decimal', value: c ? eurPlain(c.plan) : '', placeholder: '0,00' });
+  const analyze = el('input', { type: 'checkbox' }); analyze.checked = !!c?.analyze;
+  const save = () => {
+    const n = name.value.trim(), p = parseEur(plan.value);
+    if (!n) return alert('Naziv je obavezan.');
+    if (c) { c.name = n; c.plan = p; if (analyze.checked) c.analyze = true; else delete c.analyze; }
+    else { const obj = { id: 'var-' + uid(), name: n, plan: p }; if (analyze.checked) obj.analyze = true; state.variableCategories.push(obj); }
+    persist(); cancelEdit();
+  };
+  return formCard(field('Naziv', name), field('Plan (€/mj)', plan),
+    el('label', { class: 'checkline' }, analyze, el('span', { class: 'label' }, 'Prikaži u "Prosjek po kategoriji" u Analizi')),
+    formActions(save));
+}
+
+/* --- Lonci --- */
+function renderPotsSettings() {
+  const card = el('div', { class: 'card' }, el('h2', {}, 'Lonci'));
+  for (const p of state.pots) {
+    card.append(isEditing('pots', p.id) ? potForm(p) : editRow(`${p.name} · ${eur(p.monthly)}/mj · ${p.type}${p.nextDue ? ' · dospijeće ' + monthName(p.nextDue) : ''}`, 'pots', p.id));
+  }
+  card.append(isEditing('pots', null) ? potForm(null) : el('button', { class: 'ghost', onclick: () => startEdit('pots', null) }, '+ Dodaj lonac'));
+  return card;
+}
+function potForm(p) {
+  const name = el('input', { type: 'text', value: p?.name ?? '', placeholder: 'Naziv' });
+  const type = el('select', {}, el('option', { value: 'sinking' }, 'sinking (godišnji račun)'), el('option', { value: 'savings' }, 'savings (ulaganje, raste zauvijek)'));
+  type.value = p?.type ?? 'sinking';
+  const monthly = el('input', { type: 'text', inputmode: 'decimal', value: p ? eurPlain(p.monthly) : '', placeholder: '0,00' });
+  const target = el('input', { type: 'text', inputmode: 'decimal', value: p?.targetAmount ? eurPlain(p.targetAmount) : '', placeholder: '0,00' });
+  const nextDue = el('input', { type: 'text', value: p?.nextDue ?? '', placeholder: 'YYYY-MM' });
+  const startMonth = el('input', { type: 'text', value: p?.startMonth ?? '', placeholder: 'YYYY-MM' });
+  const save = () => {
+    const n = name.value.trim(), m = parseEur(monthly.value), sm = startMonth.value.trim(), t = type.value;
+    if (!n || !sm) return alert('Naziv i početni mjesec su obavezni.');
+    if (p) {
+      p.name = n; p.type = t; p.monthly = m; p.startMonth = sm;
+      if (t === 'sinking') {
+        const tgt = parseEur(target.value), nd = nextDue.value.trim();
+        if (!tgt || !nd) return alert('Sinking lonac treba cilj i dospijeće (YYYY-MM).');
+        p.targetAmount = tgt; p.nextDue = nd;
+      } else { delete p.targetAmount; delete p.nextDue; }
+    } else {
+      const obj = { id: 'pot-' + uid(), name: n, type: t, monthly: m, startMonth: sm };
+      if (t === 'sinking') {
+        const tgt = parseEur(target.value), nd = nextDue.value.trim();
+        if (!tgt || !nd) return alert('Sinking lonac treba cilj i dospijeće (YYYY-MM).');
+        obj.targetAmount = tgt; obj.nextDue = nd;
+      }
+      state.pots.push(obj);
+    }
+    persist(); cancelEdit();
+  };
+  return formCard(field('Naziv', name), field('Tip', type), field('Mjesečna rata (€)', monthly),
+    field('Cilj (€, samo za sinking)', target), field('Dospijeće (samo za sinking)', nextDue),
+    field('Početni mjesec', startMonth), formActions(save));
 }
 function driveStatusNotice() {
   if (Drive.status === 'signed-in') return el('p', { class: 'notice' }, `Povezano. Zadnja sinkronizacija: ${Drive.fileModifiedTime ? new Date(Drive.fileModifiedTime).toLocaleString('hr-HR') : '—'}`);
   if (Drive.status === 'syncing') return el('p', { class: 'notice' }, 'Spajanje na Drive…');
   if (Drive.status === 'error') return el('p', { class: 'notice' }, 'Greška pri spajanju na Drive: ' + (Drive.error || '?'));
   return el('p', { class: 'notice' }, 'Nije povezano. Podaci se čuvaju samo lokalno, u ovom pregledniku.');
-}
-function listCard(title, lines) {
-  return el('div', { class: 'card' }, el('h2', {}, title), lines.map(l => el('div', { class: 'row' }, el('span', { class: 'label' }, l))));
 }
 function importJson() {
   const inp = el('input', { type: 'file', accept: 'application/json' });

@@ -47,16 +47,17 @@ istovremeno na dva uređaja.
 | Ekran "Mjesec" | ✅ gotovo |
 | Ekran "Lonci" | ✅ gotovo |
 | Ekran "Analiza" (grafovi) | ✅ gotovo (osnovno) |
-| Ekran "Postavke" | ✅ gotovo (pregled + izvoz/uvoz JSON; uređivanje stavki kroz UI još ne) |
+| Ekran "Postavke" | ✅ gotovo — pregled + izvoz/uvoz JSON + **uređivanje kroz UI** (dodaj/uredi/obriši za prihode, fiksne troškove, varijabilne kategorije, lonce) |
 | Unos honorara (split u ulaganja) | ✅ gotovo |
-| Izvoz CSV/Excel | 🚧 samo JSON izvoz/uvoz zasad |
+| Izvoz CSV/Excel | ✅ gotovo — CSV (ne Excel binarno, ali otvara se izravno u Excelu) |
 | Google Drive sync | ✅ gotovo, potvrđeno uživo (odjeljak 10) |
 | PWA ikone | ✅ gotovo (`icons/icon-192.png`, `icon-512.png`) |
 | Hosting (GitHub Pages) | ✅ gotovo — https://nbe-design.github.io/budzet_app/ — potvrđeno na mobitelu |
 
-**Sljedeći korak:** app radi na računalu i mobitelu, na javnoj adresi, sa Google Drive
-sinkronizacijom. Preostaje (nije hitno): "Add to Home Screen" na mobitelu za pravi
-app-like osjećaj, CSV/Excel izvoz, uređivanje postavki kroz UI (za sad samo Izvoz/Uvoz JSON).
+**Sljedeći korak:** sve iz v1 opsega (odjeljak 9) je gotovo. App radi na računalu i
+mobitelu, na javnoj adresi, sa Google Drive sinkronizacijom, uređivanjem postavki kroz UI
+i CSV izvozom. Preostaje samo (nije hitno): "Add to Home Screen" na mobitelu za pravi
+app-like osjećaj, i eventualno izvan-v1 stavke iz odjeljka 9 ako ustreba.
 
 ---
 
@@ -479,7 +480,11 @@ prazne — ne stvara se rupa u računu.
 - **Analiza**: potrošnja po mjesecima (stupčasti graf) • prosjek po kategoriji •
   top 5 stavki mjeseca • plan vs. ostvareno kumulativno kroz godinu.
 - **Ručno otvaranje novog mjeseca**; prošli uredivi, označeni "zaključen".
-- **Izvoz** CSV/Excel + izvoz/uvoz cijelog JSON-a.
+- **Izvoz** CSV (ravna lista svih transakcija, otvara se u Excelu) + izvoz/uvoz cijelog JSON-a.
+- **Uređivanje postavki kroz UI**: dodaj/uredi/obriši za prihode, fiksne troškove
+  (uklj. godišnje/annual), varijabilne kategorije (uklj. `analyze` flag), lonce
+  (uklj. tip sinking/savings). Mijenja samo predloške — ne utječe retroaktivno na
+  već otvorene mjesece (isto ponašanje kao i prije, kroz JSON uređivanje).
 - **Podaci**: v1 localStorage; v2 jedan JSON u Google Driveu (atomarno + timestampirani backupi).
 
 ### Izvan v1 (moguće kasnije)
