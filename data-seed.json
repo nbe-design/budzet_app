@@ -29,22 +29,22 @@
     { "id": "fx-claude",        "name": "Claude",              "amount": 2250,  "day": 11, "startMonth": null,      "endMonth": null },
     { "id": "fx-rata-banka-1",  "name": "Rata banka 1",        "amount": 1667,  "day": 11, "startMonth": null,      "endMonth": "2027-08" },
     { "id": "fx-rata-banka-2",  "name": "Rata banka 2",        "amount": 5556,  "day": 7,  "startMonth": null,      "endMonth": "2027-03" },
-    { "id": "fx-kasko-pola",    "name": "Kasko (pola)",        "amount": 25000, "day": 15, "startMonth": "2026-11", "endMonth": "2026-11" }
+    { "id": "fx-kasko-pola",    "name": "Kasko (pola)",        "amount": 25000, "day": 15, "startMonth": "2026-11", "endMonth": "2026-11" },
+    { "id": "fx-osig-nezgoda",  "name": "Osiguranje od nezgode", "amount": 730, "day": 15, "startMonth": "2027-07", "endMonth": null, "recurrence": "annual" },
+    { "id": "fx-hrana",         "name": "Hrana",               "amount": 35000, "day": 11, "startMonth": null,      "endMonth": null }
   ],
   "variableCategories": [
-    { "id": "var-hrana",          "name": "Hrana",          "plan": 30000 },
-    { "id": "var-zivot",          "name": "Život",          "plan": 20000 },
-    { "id": "var-gorivo",         "name": "Gorivo",         "plan": 15000 },
-    { "id": "var-porez-najam",    "name": "Porez na najam", "plan": 5880 }
+    { "id": "var-zivot",          "name": "Život",          "plan": 20000, "analyze": true },
+    { "id": "var-gorivo",         "name": "Gorivo",         "plan": 15000, "analyze": true },
+    { "id": "var-porez-najam",    "name": "Porez na najam", "plan": 5880 },
+    { "id": "var-ulaganja",       "name": "Ulaganja (T212)", "plan": 22500 }
   ],
   "pots": [
-    { "id": "pot-ulaganja",   "name": "Ulaganja (T212)",              "type": "savings", "monthly": 22500, "startMonth": "2026-09" },
-    { "id": "pot-more",       "name": "More",                         "type": "sinking", "monthly": 5000, "targetAmount": 60000, "dueMonth": 7,  "startMonth": "2026-09" },
-    { "id": "pot-kasko",      "name": "Kasko",                        "type": "sinking", "monthly": 4167, "targetAmount": 50000, "dueMonth": 11, "startMonth": "2026-12" },
-    { "id": "pot-servis",     "name": "Servis auto",                  "type": "sinking", "monthly": 3333, "targetAmount": 40000, "dueMonth": 5,  "startMonth": "2026-09" },
-    { "id": "pot-registracija","name": "Registracija + osiguranje auto","type": "sinking","monthly": 3333, "targetAmount": 40000, "dueMonth": 7,  "startMonth": "2026-09" },
-    { "id": "pot-osig-doma",  "name": "Osiguranje doma",              "type": "sinking", "monthly": 501,  "targetAmount": 6013,  "dueMonth": 6,  "startMonth": "2026-09" },
-    { "id": "pot-osig-nezgoda","name": "Osiguranje od nezgode",       "type": "sinking", "monthly": 61,   "targetAmount": 730,   "dueMonth": 7,  "startMonth": "2026-09" }
+    { "id": "pot-more",       "name": "More",                         "type": "sinking", "monthly": 5450, "targetAmount": 60000, "nextDue": "2027-07", "startMonth": "2026-09" },
+    { "id": "pot-kasko",      "name": "Kasko",                        "type": "sinking", "monthly": 3333, "targetAmount": 50000, "nextDue": "2027-11", "startMonth": "2026-09" },
+    { "id": "pot-servis",     "name": "Servis auto",                  "type": "sinking", "monthly": 4444, "targetAmount": 40000, "nextDue": "2027-05", "startMonth": "2026-09" },
+    { "id": "pot-registracija","name": "Registracija + osiguranje auto","type": "sinking","monthly": 3636, "targetAmount": 40000, "nextDue": "2027-07", "startMonth": "2026-09" },
+    { "id": "pot-osig-doma",  "name": "Osiguranje doma",              "type": "sinking", "monthly": 601,  "targetAmount": 6013,  "nextDue": "2027-06", "startMonth": "2026-09" }
   ],
   "months": {}
 }

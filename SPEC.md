@@ -41,21 +41,21 @@ istovremeno na dva uređaja.
 | Dio | Status |
 |---|---|
 | Specifikacija + podaci | ✅ gotovo (ovaj dokument + `data-seed.json`) |
-| Scaffold (index.html, app.js, manifest, sw) | 🚧 započeto |
-| Data model + izračuni | ⬜ |
-| Dashboard | ⬜ |
-| Ekran "Mjesec" | ⬜ |
-| Ekran "Lonci" | ⬜ |
-| Ekran "Analiza" (grafovi) | ⬜ |
-| Ekran "Postavke" | ⬜ |
-| Unos honorara (split u ulaganja) | ⬜ |
-| Izvoz CSV/Excel | ⬜ |
-| Google Drive sync | ⬜ (postavlja se zajedno kasnije) |
-| PWA ikone | ⬜ |
+| Scaffold (index.html, app.js, manifest, sw) | ✅ gotovo |
+| Data model + izračuni | ✅ gotovo |
+| Dashboard | ✅ gotovo |
+| Ekran "Mjesec" | ✅ gotovo |
+| Ekran "Lonci" | ✅ gotovo |
+| Ekran "Analiza" (grafovi) | ✅ gotovo (osnovno) |
+| Ekran "Postavke" | ✅ gotovo (pregled + izvoz/uvoz JSON; uređivanje stavki kroz UI još ne) |
+| Unos honorara (split u ulaganja) | ✅ gotovo |
+| Izvoz CSV/Excel | 🚧 samo JSON izvoz/uvoz zasad |
+| Google Drive sync | ✅ gotovo, potvrđeno uživo (odjeljak 10) |
+| PWA ikone | ✅ gotovo (`icons/icon-192.png`, `icon-512.png`) |
 
-**Sljedeći korak:** dovršiti scaffold → data model → dashboard → ostali ekrani.
-Testira se lokalno u pregledniku. Kad v1 radi, zajedno se postavi Google Drive OAuth
-(~15 min) i hosting.
+**Sljedeći korak:** preostaje: hosting (GitHub/Cloudflare Pages, pa dodati taj origin u
+OAuth klijent na projektu "My First Project" — vidi odjeljak 10), CSV/Excel izvoz,
+uređivanje postavki kroz UI (za sad samo Izvoz/Uvoz JSON).
 
 ---
 
@@ -76,10 +76,13 @@ budzet/
   README.md
 ```
 
-- **Pohrana v1:** `localStorage` ključ `budzet_data_v1`. Import/export JSON gumb.
-- **Pohrana v2:** apstrakcija `Store` — `load()` / `save()` — zamijeni localStorage
-  implementacijom koja čita/piše jedan `budzet.json` u Google Driveu (Drive JS API,
-  `drive.file` scope, "Sign in with Google" jednom po uređaju).
+- **Pohrana v1:** `localStorage` ključ `budzet_data_v1`. Import/export JSON gumb. Uvijek aktivno.
+- **Pohrana v2 (Google Drive):** `Drive` objekt u `app.js` (odjeljak 10) — **uz** localStorage,
+  ne umjesto njega (localStorage ostaje brzi lokalni cache za offline; Drive je sinkronizirana
+  kopija). `persist()` uvijek sprema lokalno, i dodatno gura na Drive ako je korisnik prijavljen.
+  Jedina vanjska ovisnost o mreži: `<script src="https://accounts.google.com/gsi/client">` u
+  `index.html` (Google Identity Services) — učitava se async, app radi i bez interneta,
+  samo bez Drive dijela.
 - Grafovi: ručno crtani SVG, bez vanjskih biblioteka (offline-first).
 - Novac: rad u centima (integer) gdje god moguće da se izbjegne float greška; prikaz s 2 decimale.
 
@@ -109,21 +112,28 @@ budzet/
   "fixedCosts": [
     // day = dan u mjesecu dospijeća; startMonth/endMonth = "YYYY-MM" ili null
     // jednokratni trošak: startMonth === endMonth
+    // recurrence: "annual" (opcionalno) = ponavlja se svake godine samo u mjesecu
+    //   iz startMonth (npr. startMonth "2027-07" + recurrence "annual" → svaki srpanj od 2027)
     { "id": "...", "name": "Kredit", "amount": 96559, "day": 1,
       "startMonth": null, "endMonth": null }
   ],
 
   "variableCategories": [
-    { "id": "...", "name": "Hrana", "plan": 30000 }   // plan = planirani mjesečni iznos
+    // analyze: true (opcionalno) = uključi u "Prosjek po kategoriji" u Analizi (odluka #18).
+    // Kategorije bez tog flaga (npr. Porez na najam, Ulaganja) postoje i vode se,
+    // samo se ne prikazuju u toj prosječnoj usporedbi (nisu "diskrecijsko trošenje").
+    { "id": "...", "name": "Život", "plan": 20000, "analyze": true }   // plan = planirani mjesečni iznos
   ],
 
   "pots": [
-    // type "sinking": nakuplja se, pa račun povuče iz lonca (dueMonth 1-12)
-    // type "savings": samo raste (ulaganja) — nema dueMonth, nema povlačenja
+    // type "sinking": nakuplja se, pa račun povuče iz lonca. nextDue = "YYYY-MM" sljedećeg
+    //   dospijeća (ne samo mjesec 1-12 — puna godina, jer prvi ciklus može preskočiti godinu).
+    //   Nakon dospijeća app automatski postavi nextDue += 12 mj. i monthly = targetAmount / 12.
+    // type "savings": samo raste (ulaganja) — nema nextDue, nema povlačenja
     { "id": "...", "name": "Servis auto", "type": "sinking",
-      "monthly": 3333, "targetAmount": 40000, "dueMonth": 5, "startMonth": "2026-09" },
-    { "id": "...", "name": "Ulaganja (T212)", "type": "savings",
-      "monthly": 22500, "startMonth": "2026-09" }
+      "monthly": 4444, "targetAmount": 40000, "nextDue": "2027-05", "startMonth": "2026-09" }
+    // type "savings" postoji u kodu ali se trenutno ne koristi — Ulaganja (T212) je
+    // premješteno u variableCategories (odluka #17), ne vodi se više kao lonac.
   ],
 
   "months": {
@@ -190,6 +200,25 @@ račun se vuče iz lonca."**
 `accountBalance` se **NE mijenja** mjesečnim doprinosom u sinking lonac
 (taj novac fizički ostaje na računu, samo je namjenski rezerviran).
 
+### Varijabilne kategorije — plan je referenca, ne "omotnica"
+
+`plan` po kategoriji (npr. Život 200 €) **ne rezervira/ne oduzima ništa unaprijed** —
+služi samo za prikaz ("potrošeno X / plan Y", dnevni budžet). `accountBalance` se
+mijenja isključivo stvarno unesenim `entries`:
+- Ako se na neku kategoriju potroši **više** od plana → prikazuje se prekoračenje
+  (crveno, "+X"), i `accountBalance` se stvarno umanji za taj veći iznos. Ništa se
+  ne posuđuje iz drugih kategorija automatski — plan je samo signal, ne ograda.
+- Ako se potroši **manje** → razlika se ne "vraća" nikamo posebno, jer nikad nije
+  ni bila oduzeta. Neiskorišteni dio jednostavno ostaje u `accountBalance` (i time
+  u "slobodno za potrošiti") jer se samo stvarni trošak (entries) oduzima od stanja.
+
+### Uneseni "stvarni" iznos vs. planirani (odluka #19)
+
+Za `income` i `potContribs` korisnik može upisati stvarni iznos (npr. plaća koja je
+sjela) koji se razlikuje od planiranog — čekiranje "primljeno/plaćeno" ne mora
+koristiti planirani broj. `actual` polje se koristi u izračunima kad postoji
+(`actual ?? planned`).
+
 ### Stanje lonca
 
 - `sinking` lonac: `Σ potContribs.actual (paid) − Σ potSpends.amount`
@@ -220,18 +249,39 @@ Kad se mjesec zatvori, `closingBalance` postaje `openingBalance` idućeg mjeseca
 
 - **Dnevni budžet** = (preostali planirani varijabilni diskrecijski iznos ovog mjeseca) / (preostali dani u mjesecu)
 - **Projekcija kraja mjeseca** = slobodno − (svi preostali planirani odljevi ovog mjeseca: neplaćeni fiksni + preostali plan varijabilnih + neplaćeni doprinosi lonaca + sinking računi koji dospijevaju ovaj mjesec)
-- **Upozorenje na manjak lonca**: za svaki sinking lonac, projicirano stanje na `dueMonth` = trenutno stanje + (mjeseci do dueMonth) × monthly. Ako < targetAmount → crveno, prikaži manjak.
+- **Upozorenje na manjak lonca**: za svaki sinking lonac, projicirano stanje na `nextDue` = trenutno stanje + (mjeseci do nextDue) × monthly. Ako < targetAmount → crveno, prikaži manjak.
+
+### Rata lonca — prvi ciklus vs. ustaljeni ciklus (odluka #15)
+
+Lonci kreću od 0. Da bi prvi ciklus svejedno stigao na `targetAmount` točno do prvog
+`nextDue` (bez čekanja punih 12 mjeseci), **prva rata se računa unaprijed** kao:
+
+```
+monthly (prvi ciklus) = targetAmount / (broj mjeseci od startMonth do nextDue, uključivo)
+```
+
+**Automatski reset ciklusa**: kad se generira mjesec u kojem `pot.nextDue == mjesec`
+(tj. lonac dospijeva), app pored `potSpend` predloška odmah postavi za sve buduće mjesece:
+- `pot.nextDue = pot.nextDue + 12 mjeseci`
+- `pot.monthly = round(pot.targetAmount / 12)`
+
+Tako se svaki lonac zasebno, čim jednom dospije, prebacuje na standardnu ratu
+(cilj podijeljen na punih 12 mjeseci) za idući ciklus — bez ručnog uređivanja.
+Rata za mjesec u kojem se dešava reset ostaje po staroj (prvog-ciklusa) stopi;
+tek sljedeći mjesec koristi novu.
 
 ### Otvaranje novog mjeseca (ručno)
 
 Kad korisnik klikne "Otvori [mjesec]":
 1. `openingBalance` = `closingBalance` prošlog mjeseca.
 2. Generiraj `income` iz `settings.income.recurring`.
-3. Generiraj `fixed` iz `fixedCosts` gdje je mjesec unutar [startMonth, endMonth].
-4. Generiraj `potContribs` iz `pots` gdje je mjesec >= pot.startMonth.
+3. Generiraj `fixed` iz `fixedCosts` gdje je mjesec unutar [startMonth, endMonth]
+   (ako `recurrence: "annual"` → samo kad se mjesec-broj poklapa s mjesecom iz startMonth).
+4. Generiraj `potContribs` iz `pots` gdje je mjesec >= pot.startMonth, po trenutnoj `pot.monthly`.
 5. Generiraj `variable` iz `variableCategories`; **plan se kopira iz prošlog mjeseca**,
    a ako postoji ≥3 mjeseca povijesti → ponudi prijedlog = prosjek zadnjih 3–6 mj.
-6. Ako sinking lonac ima `dueMonth` == ovaj mjesec → dodaj podsjetnik/predložak `potSpend`.
+6. Ako sinking lonac ima `nextDue` == ovaj mjesec → dodaj podsjetnik/predložak `potSpend`
+   i pokreni automatski reset ciklusa (gore).
 
 ### Promjena fiksnog troška
 
@@ -254,7 +304,7 @@ Doprinos u ulaganja pot se knjiži kao `potContrib` (izvanredni, povrh mjesečni
 
 | Stavka | Iznos | Dan |
 |---|---|---|
-| Plaća | +1.900 € | ~11. |
+| Plaća | +1.900 € (plan; stvaran iznos se upisuje svaki mjesec — odluka #19) | ~11. |
 | Najam | +700 € | ~1. (pretpostavka) |
 | Honorari | neredovno, promjenjiv iznos | ad hoc — pita split u ulaganja, ostatak na račun |
 
@@ -274,79 +324,113 @@ Doprinos u ulaganja pot se knjiži kao `potContrib` (izvanredni, povrh mjesečni
 | Rata banka 1 | 16,67 | ~11. | **zadnja uplata 2027-08** |
 | Rata banka 2 | 55,56 | ~7. | **zadnja uplata 2027-03** |
 | **Kasko (pola, jednokratno)** | **250,00** | ~15. | **samo 2026-11** |
+| **Osiguranje od nezgode (godišnje)** | **7,30** | ~15. (pretp.) | **jednom/god, prvi put srpanj 2027 — vidi odluku #14** |
+| **Hrana** | **350,00** | 11. | — (premješteno iz varijabilnih, odluka #16) |
 
 *Napomena: rate su obje aktivne sada (rujan 2026). Iznos rate 2 varira par centi po
-mjesecu — nebitno. Kasko se ove godine dijeli pola-pola sa suprugom → jednokratni
-fiksni trošak 250 € u studenom; lonac "Kasko" kreće tek 2026-12 za idući ciklus.*
+mjesecu — nebitno. Kasko za 2026. dijeli se pola-pola sa suprugom → jednokratni
+fiksni trošak 250 € u studenom 2026.; lonac "Kasko" (ispod) kreće već 2026-09
+za ciklus koji dospijeva 2027-11. Osiguranje od nezgode se od 2026. ne skuplja
+kroz lonac nego plaća jednokratno kad dospije (odluka #14) — modelirano kao
+godišnji fiksni trošak (`recurrence: "annual"`), ne mjesečni. Hrana je od
+2026-09-09 fiksni trošak 350 € (ranije varijabilna kategorija, plan 300 €) —
+odluka #16, jer je stvarna potrošnja dosljedno oko tog iznosa.*
 
-**Stalno fiksno ukupno (bez rata i kaska): 1.220,39 €/mj**
+**Stalno fiksno ukupno (bez rata i kaska): 1.570,39 €/mj**
 
 ### Varijabilne kategorije (mjesečni plan)
 
-| Kategorija | Plan €/mj | Dan |
+| Kategorija | Plan €/mj | Analizira se u Analizi? |
 |---|---|---|
-| Hrana | 300 | ~11. |
-| Život | 200 | ~11. |
-| Gorivo | 150 | varijabilno |
-| Porez na najam | 58,80 | varijabilno |
+| Život | 200 | da |
+| Gorivo | 150 | da |
+| Porez na najam | 58,80 | ne (pass-through, nije diskrecijsko trošenje) |
+| Ulaganja (T212) | 225 | ne (ulaganje, ne trošenje — vidi odluku #17) |
 
-*(Porez na najam je premješten iz fiksnih u varijabilne na Nikolin zahtjev.)*
+*(Porez na najam je premješten iz fiksnih u varijabilne na Nikolin zahtjev. Hrana je
+izašla iz ove liste u Fiksne troškove — odluka #16. Ulaganja (T212) je ušlo u ovu
+listu iz Lonaca — odluka #17. "Analizira se" = prikazuje li se u "Prosjek po
+kategoriji" u Analizi; odluka #18.)*
 
-**Varijabilni plan ukupno: 708,80 €/mj**
+**Varijabilni plan ukupno: 633,80 €/mj**
 
 ### Lonci
 
-| Lonac | Tip | €/mj | Cilj/god | Dospijeva | Lonac kreće |
-|---|---|---|---|---|---|
-| Ulaganja (T212) | savings | 225,00 | — (raste zauvijek) | — | 2026-09 |
-| More | sinking | 50,00 | 600 | **srpanj** | 2026-09 |
-| Kasko | sinking | 41,67 | ~500 | studeni | **2026-12** |
-| Servis auto | sinking | 33,33 | ~400 | svibanj | 2026-09 |
-| Registracija + osiguranje auto | sinking | 33,33 | ~400 | srpanj | 2026-09 |
-| Osiguranje doma | sinking | 5,01 | 60,13 | lipanj | 2026-09 |
-| Osiguranje od nezgode | sinking | 0,61 | 7,30 | srpanj | 2026-09 |
+Svi lonci kreću od 0 u rujnu 2026. **Prvi ciklus** svakog sinking lonca koristi ratu
+= cilj / preostali mjeseci do prvog dospijeća (da stigne na cilj bez manjka — vidi
+odluku #15). Nakon prvog dospijeća app automatski prelazi na standardnu ratu
+(cilj/12) za idući (i svaki sljedeći) ciklus.
 
-**Mjesečna rezervacija u lonce:**
-- rujan–studeni 2026: ~347 €/mj (bez kaska)
-- od prosinca 2026: ~389 €/mj (s kaskom)
+| Lonac | Tip | €/mj (prvi ciklus, sada) | Cilj | Prvo dospijeće | Lonac kreće | €/mj nakon reseta |
+|---|---|---|---|---|---|---|
+| More | sinking | 54,50 | 600 | **srpanj 2027** | 2026-09 | 50,00 |
+| Kasko | sinking | 33,33 | ~500 | **studeni 2027** | 2026-09 | 41,67 |
+| Servis auto | sinking | 44,44 | ~400 | svibanj 2027 | 2026-09 | 33,33 |
+| Registracija + osiguranje auto | sinking | 36,36 | ~400 | srpanj 2027 | 2026-09 | 33,33 |
+| Osiguranje doma | sinking | 6,01 | 60,13 | lipanj 2027 | 2026-09 | 5,01 |
 
-*Honorari se ulijevaju u lonac "Ulaganja (T212)" povrh mjesečnih 225.*
+*Osiguranje od nezgode više nije lonac (odluka #14) — vidi Fiksni troškovi.
+Ulaganja (T212) više nije lonac (odluka #17) — vidi Varijabilne kategorije gore;
+ukupan uloženi iznos kroz vrijeme se i dalje prikazuje, sad u ekranu Analiza.*
+*Kasko za 2026. (studeni) plaćen izvan lonca, jednokratnim fiksnim troškom 250 €
+(pola-pola); lonac "Kasko" gore je za idući ciklus, dospijeva studeni 2027, i kreće
+već sad (rujan 2026) umjesto tek u prosincu.*
+
+**Mjesečna rezervacija u lonce (svih 5 sinking lonaca, prvi ciklus): ~174,64 €/mj od
+rujna 2026.** Postupno pada kako svaki lonac zasebno dospijeva i prelazi na nižu
+standardnu ratu; kad svi prođu prvi ciklus (do studenog 2027): ~163,34 €/mj.
+
+*Honorari se ulijevaju u varijabilnu kategoriju "Ulaganja (T212)" povrh mjesečnih 225
+(odluka #17; ranije kao doprinos lonca, ista svrha).*
 
 ### Tipičan mjesec
 
 | | Iznos |
 |---|---|
 | Prihodi (plaća + najam) | +2.600 € |
-| Fiksni (rujan 2026, obje rate) | −1.292,62 € |
-| Rezervacija u lonce | −347,28 € |
-| Varijabilni plan | −708,80 € |
-| **Ostatak** | **~251 € + honorari** |
+| Fiksni (rujan 2026, obje rate + Hrana) | −1.642,62 € |
+| Rezervacija u lonce (5 sinking, prvi ciklus) | −174,64 € |
+| Varijabilni plan (uklj. Ulaganja 225) | −633,80 € |
+| **Ostatak** | **~148,94 € + honorari** |
 
-Od svibnja 2027 (rata 2 otpala) i rujna 2027 (rata 1 otpala): ~265–282 € + honorari.
+*Napomena: "Ostatak" ovdje je ilustrativan (koliko je novca stvarno "neraspoređeno" tog
+mjeseca) — ne treba ga brkati s formalnim `closingBalance` iz odjeljka 5, koji doprinose
+u sinking lonce ne oduzima (taj novac fizički ostaje na računu, samo je rezerviran).
+Ukupni zbroj se nije promijenio premještanjem Ulaganja/Hrane između kategorija (isti
+novac, samo drugi red u tablici) — pao je jedino za +50 € razlike Hrane (300→350).*
+
+Studeni 2026 je iznimka: uz redovan mjesec dolazi i jednokratni trošak Kasko (pola)
+250 € → ostatak (ilustrativno) pada na **~−101,06 € prije honorara**. Stvarno stanje
+računa **ne ide u minus** — samo je gotovo sav novac tog mjeseca već rezerviran/
+namijenjen (fiksni + lonci + ulaganja), umjesto fizički potrošen. Ventil: taj mjesec
+uplatiti manje u ulaganja (varijabilna kategorija, može se preskočiti/smanjiti bez
+posljedica), ili pokriti honorarom.
+
+Od svibnja 2027 (prvi lonci resetiraju na nižu ratu, rata banka 2 otpala) situacija se
+postupno opušta.
 
 ---
 
-## 7. Poznati problemi — prva godina
+## 7. Poznati problemi — prva godina (riješeno)
 
-Lonci kreću od **0** u rujnu 2026 (dogovoreno). Do prvih dospijeća neće biti puni:
+Lonci kreću od **0** u rujnu 2026. Ranije je ovo značilo manjak na prvom dospijeću
+svakog lonca (nedovoljno mjeseci da se skupi cijeli cilj). **Riješeno (2026-09-09,
+razgovor s Claudeom): prva rata svakog lonca preračunata je na cilj / preostali
+mjeseci do prvog dospijeća**, pa lonac stiže na cilj točno na vrijeme, bez manjka —
+vidi tablicu u odjeljku 6 i pravilo u odjeljku 5 ("Rata lonca — prvi ciklus vs.
+ustaljeni ciklus"). Nakon prvog dospijeća app automatski prelazi na standardnu ratu
+(cilj/12), pa se manjak ne može ponoviti u idućim ciklusima.
 
-| Račun | Dospijeva | Ušteđeno do tada | Treba | Manjak |
-|---|---|---|---|---|
-| Kasko | ~~stu 2026~~ → riješeno jednokratnim 250 € (pola-pola) | | | — |
-| Servis auto | svi 2027 | ~267 € (8 mj) | ~400 € | ~133 € |
-| Osiguranje doma | lip 2027 | ~45 € (9 mj) | 60 € | ~15 € |
-| Registracija+osig. | srp 2027 | ~333 € (10 mj) | ~400 € | ~67 € |
-| More | srp 2027 | ~500 € (10 mj) | 600 € | ~100 € |
-| Osiguranje nezgode | srp 2027 | ~6 € | 7,30 € | ~1 € |
+Osiguranje od nezgode je izbačeno iz lonaca posebno (odluka #14) — plaća se
+jednokratno kad dospije, umjesto skupljanja 0,61 €/mj kroz godinu.
 
-**Manjkovi se pokrivaju iz mjesečnog ostatka kad račun stigne** (odluka: opcija a).
-App to samo jasno prikazuje unaprijed.
+**Preostala posljedica (ne manjak, samo tjesniji mjesec):** studeni 2026 je tjesniji
+nego prije, jer se lonac "Kasko" za idući ciklus već puni od rujna 2026 UZ jednokratni
+trošak od 250 € za ovogodišnji kasko. Vidi "Tipičan mjesec" u odjeljku 6.
 
-**Studeni 2026 je najtjesnji mjesec:** zbog 250 € kaska ostatak pada na ~1 € (prije
-honorara). Ventil: taj mjesec uplatiti manje u ulaganja, ili pokriti honorarom.
-
-**Srpanj 2027 je težak:** registracija + nezgoda + more dospijevaju istovremeno;
-lonci pokrivaju većinu, ostane ~170 € manjka raspoređeno.
+**Srpanj 2027 ostaje mjesec s više istovremenih dospijeća** (More + Registracija/osiguranje
+auto), ali oba lonca su tada već puna na cilj (bez manjka), pa se samo istovremeno
+prazne — ne stvara se rupa u računu.
 
 ---
 
@@ -362,11 +446,17 @@ lonci pokrivaju većinu, ostane ~170 € manjka raspoređeno.
 | 6 | Kategorije | Fiksna lista u postavkama, dopunjiva. Plosnata + neobavezni tag (ne pune potkategorije). |
 | 7 | Fiksni trošak model | Iznos + početni mjesec + trajanje/završni mjesec. Nova rata = nova stavka s datumima. |
 | 8 | Honorari | Idu u Ulaganja (T212). Pri unosu pitati koliko od honorara ide u ulaganja; ostatak na stanje računa. |
-| 9 | Ulaganja | Fiksni mjesečni ulog 225 € (može se uplatiti manje neki mjesec). Lonac vodi **ukupni zbroj kroz vrijeme**. |
-| 10 | Lonci početno stanje | Svi kreću od 0 (osim kaska koji kreće 2026-12). |
+| 9 | Ulaganja | Fiksni mjesečni ulog 225 € (može se uplatiti manje neki mjesec). Ukupni zbroj kroz vrijeme se prati — od #17 kao varijabilna kategorija, prikazano u Analizi. |
+| 10 | Lonci početno stanje | Svi kreću od 0. Svi (uklj. Kasko) kreću 2026-09 — vidi #15. |
 | 11 | Dugovi prema drugima | Nema (osim kredita i bankovnih rata — modelirani kao fiksni troškovi). |
 | 12 | Ciljevi štednje | Izbačeno iz v1 (sinking + ulaganja djelomično pokrivaju). |
 | 13 | Plaćeno / nije plaćeno | Kvačica po stavci (fiksni, doprinosi lonaca, prihodi). |
+| 14 | Osiguranje od nezgode | Izbačeno iz lonaca (2026-09-09). Plaća se jednokratno kad dospije (prvi put srpanj 2027), modelirano kao godišnji fiksni trošak (`recurrence: "annual"`), ne kao sinking lonac. |
+| 15 | Rata lonca prve godine | Svi lonci kreću od 0 u 2026-09, ali prva rata svakog = cilj / preostali mjeseci do prvog dospijeća (ne cilj/12), da se izbjegne manjak na prvom dospijeću. Kasko time kreće već 2026-09 (ne 2026-12), rata 33,33 €. Nakon dospijeća app **automatski resetira**: nextDue +12 mj., rata = cilj/12 — posebno po lonac, bez ručnog uređivanja. |
+| 16 | Hrana | Premješteno iz varijabilnih kategorija (plan 300 €) u fiksne troškove, 350 €/mj (2026-09-09) — stvarna potrošnja je dosljedno oko tog iznosa, nema smisla tretirati ga kao promjenjivo. |
+| 17 | Ulaganja (T212) lokacija | Premješteno iz Lonaca (type "savings") u varijabilne kategorije, plan 225 €/mj (2026-09-09). Honorar-investicija se knjiži kao unos u tu kategoriju (ne kao potContrib). Ukupan uloženi iznos kroz vrijeme prikazan u Analizi. Razlog: iznos varira po mjesecu i konceptualno je bliže "varijabilnom" unosu nego fiksnoj rezervaciji. |
+| 18 | Analiza — koje kategorije | "Prosjek po kategoriji" u Analizi prikazuje samo kategorije s `analyze: true` (Život, Gorivo) — Porez na najam (pass-through) i Ulaganja (investicija, ne trošenje) nisu korisne za tu usporedbu, pa su izostavljene (2026-09-09). |
+| 19 | Stvarni vs. planirani iznos | Prihodi i uplate u lonce imaju uređivo polje za stvarni iznos (ne samo checkbox), jer se npr. plaća rijetko poklapa točno s planom (2026-09-09). |
 
 ---
 
@@ -375,8 +465,9 @@ lonci pokrivaju većinu, ostane ~170 € manjka raspoređeno.
 - **Stanje računa** koje se prenosi iz mjeseca u mjesec (Nikolin "ostatak").
 - **Fiksni troškovi** s iznosom + trajanjem otplate → auto-generiranje svaki mjesec,
   auto-gašenje na kraju. Dodavanje nove rate = nova stavka. Podrška za jednokratni trošak.
-- **Lonci**: 6 sinking + 1 savings (ulaganja). Rezervacija umanjuje slobodni novac,
-  sinking račun se vuče iz lonca, upozorenje na manjak prije dospijeća.
+- **Lonci**: 5 sinking (More, Kasko, Servis auto, Registracija+osiguranje, Osiguranje
+  doma). Rezervacija umanjuje slobodni novac, sinking račun se vuče iz lonca,
+  upozorenje na manjak prije dospijeća. Automatski reset rate nakon dospijeća (#15).
 - **Varijabilne kategorije** s planom po mjesecu (kopira se iz prošlog + prijedlog po prosjeku).
   Inline unos pojedinačnih troškova (Enter-za-dodati).
 - **Plaćeno / nije plaćeno** kvačica po stavci.
@@ -392,7 +483,6 @@ lonci pokrivaju većinu, ostane ~170 € manjka raspoređeno.
 
 ### Izvan v1 (moguće kasnije)
 
-- Google Drive sync (postavlja se zajedno nakon što v1 radi).
 - Prave push obavijesti (tray app / scheduled task na jednom računalu).
 - Ciljevi štednje s rokom.
 - Fotografija računa uz trošak.
@@ -400,19 +490,89 @@ lonci pokrivaju većinu, ostane ~170 € manjka raspoređeno.
 
 ---
 
-## 10. Google Drive sync — bilješke za kasnije
+## 10. Google Drive sync — status: implementirano (2026-09-09), čeka test uživo
 
-1. Google Cloud Console → novi projekt (besplatno).
-2. OAuth consent screen: External, dodati Nikolin mail kao test usera (ili objaviti —
-   `drive.file` je "ne-osjetljiv" scope pa verifikacija nije nužna za produkciju).
-3. Credentials → OAuth client ID, tip "Web application", dodati origin hostinga
-   (npr. `https://nikola.github.io`) u Authorized JavaScript origins.
+Google Cloud projekt `budzet-app` postoji, OAuth consent screen (External, Testing,
+Nikola dodan kao test user), Drive API omogućen, OAuth Client ID kreiran s
+Authorized JavaScript origin `http://localhost:8761`.
+
+**Client ID je u kodu**: `app.js`, konstanta `GOOGLE_CLIENT_ID` (na vrhu, odmah nakon
+`Store` bloka). Nije tajna — client ID za web-app OAuth je namjerno javan (sigurnost
+dolazi od Authorized origins provjere na Googleovoj strani, ne od skrivanja ID-a).
+
+### Kako radi (`Drive` objekt u app.js)
+
+- **Tiha prijava pri učitavanju**: `Drive.init()` (poziva se kad se GIS skripta učita,
+  vidi kraj `app.js`) pokuša `requestAccessToken({prompt:''})` — bez popupa, radi
+  samo ako je korisnik već jednom pristao na tom uređaju/pregledniku. Prvi put ne
+  uspijeva (nema popupa još) — normalno, treba klik na "Prijavi se".
+- **Postavke → "Prijavi se"** (`Drive.signIn()`) — otvara Googleov consent popup
+  (stvaran klik, nije blokiran popup-blockerom). Test usera će dočekati
+  "Google hasn't verified this app" ekran (jer je app u Testing modu) — klik na
+  "Advanced" → "Go to Budžet (unsafe)" je normalan korak, ne stvarna opasnost
+  (app je vlastita, `drive.file` scope je uskoro-ograničen).
+- **Pri spajanju** (`_syncOnConnect`): traži `budzet.json` na Driveu. Ne postoji →
+  kreira ga sa trenutnim lokalnim stanjem. Postoji i **novije** je od lokalnog →
+  pita (confirm dijalog) da učita Drive verziju (zamjenjuje lokalnu).
+- **Svako spremanje** (`persist()`) dok je `Drive.status === 'signed-in'` → i
+  `Drive.push()` u pozadini (fire-and-forget, ne blokira UI). Prije prepisivanja
+  postojeće Drive datoteke pravi se `budzet-backup-YYYYMMDD...json` kopija —
+  najviše 1×/24h (da ne spamira Drive), stare backupove iznad 20 briše.
+- **"Spremi na Drive sada"** gumb u Postavkama — ručni forsirani push.
+- **Odjava** — revoke tokena, sljedeći put treba ponovni klik "Prijavi se".
+
+### Testirano
+
+- ✅ **Potvrđeno uživo (2026-09-09), radi kraj-do-kraja.** Nikola se prijavio kroz
+  "Prijavi se" u Firefoxu, `budzet.json` se stvorio na njegovom stvarnom Google Driveu,
+  Postavke pokazuju "Povezano. Zadnja sinkronizacija: ...".
+
+### Zamka na koju se naletjelo (za buduće referenc)
+
+**Google Cloud ima "My First Project" — automatski zadani projekt** koji postoji od
+prvog ikad otvaranja Cloud Consolea, prije nego korisnik svjesno stvori svoj. Drive
+API + OAuth Client su (nesvjesno) kreirani na tom zadanom projektu (`handy-cell-508119-a3`,
+naziv klijenta "Budget-app"), ali kad je trebalo dodati test-usera, "Get started" wizard
+na Auth Platformu je odveo na **drugi**, novo-stvoreni projekt "budzet-app"
+(`budzet-app-508119`) koji nema nikakve klijente. Rezultat: sat vremena "access_denied"
+grešaka jer se test-user dodavao na krivi projekt.
+
+**Dijagnoza koja je pomogla**: Google Cloud Console → gornji lijevi padajući izbornik s
+nazivom projekta → provjeriti **Clients** stranicu na svakom projektu dok se ne nađe
+onaj gdje stvarni Client ID (`88610669220-...`) postoji. Audience/test-useri se
+podešavaju **na tom istom projektu**, ne na onom trenutno "otvorenom" u UI-u po defaultu.
+
+Prazan projekt "budzet-app" (`budzet-app-508119`) ostaje nekorišten — može se obrisati,
+nije hitno, ne utječe na rad.
+
+### Preostali koraci za bilo koga koji nastavlja ovo
+
+1. Kad se app hostira (GitHub Pages / Cloudflare Pages), dodati tu adresu kao **novi**
+   Authorized JavaScript origin u istom OAuth klijentu (Google Cloud Console →
+   Credentials → uredi klijent) — postojeći `http://localhost:8761` može ostati
+   za lokalni dev.
+2. Ako se port lokalnog servera opet promijeni, ili se doda origin, treba i tu
+   dodati u Authorized origins, inače prijava puca s "redirect_uri_mismatch"-like
+   greškom (Google odbije popup).
+3. `drive.file` scope znači: app vidi samo `budzet.json` (i backup datoteke) koje je
+   sam kreirao — ne cijeli Nikolin Drive. To je namjerno (odluka iz odjeljka 1).
+
+### Referenca — originalni plan (za usporedbu)
+
+1. Google Cloud Console → novi projekt (besplatno). ✅
+2. OAuth consent screen: External, dodati Nikolin mail kao test usera. ✅
+3. Credentials → OAuth client ID, tip "Web application", dodati origin
+   (`http://localhost:8761` sada; hosting origin kasnije) u Authorized JavaScript origins. ✅
 4. U aplikaciji: Google Identity Services (GIS) token client, scope
-   `https://www.googleapis.com/auth/drive.file`.
-5. Datoteka `budzet.json` u dediciranom app folderu (ili u korijenu Drivea).
-6. `Store.load()` → traži datoteku po imenu, GET media. `Store.save()` → PATCH media,
-   uz provjeru `modifiedTime` (ako je novije nego zadnje viđeno → upozori na konflikt).
-7. Prije svakog spremanja: kopija u `budzet-backup-YYYYMMDD-HHMMSS.json` (zadrži zadnjih ~20).
+   `https://www.googleapis.com/auth/drive.file`. ✅
+5. Datoteka `budzet.json` u korijenu Drivea (ne u posebnom folderu — jednostavnije, i
+   `drive.file` scope svejedno ograničava vidljivost samo na datoteke koje app kreira). ✅
+6. `Drive._syncOnConnect()` → traži datoteku po imenu. `Drive.push()` → PATCH media.
+   Provjera `modifiedTime` radi se **pri spajanju** (ne na svakom pojedinom save-u —
+   vidi "Poznata ograničenja" u odjeljku 1: konflikt je prihvaćen rizik jer je jedan
+   korisnik). ✅
+7. Prije prepisivanja: kopija u `budzet-backup-<ISO timestamp>.json`, max 1×/24h
+   (ne na svaki save — previše poziva), stare iznad 20 se brišu. ✅
 
 ---
 

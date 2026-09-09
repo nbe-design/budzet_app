@@ -28,21 +28,26 @@ const SEED = {
     { id: 'fx-rata-banka-1',   name: 'Rata banka 1',         amount: 1667,  day: 11, startMonth: null,      endMonth: '2027-08' },
     { id: 'fx-rata-banka-2',   name: 'Rata banka 2',         amount: 5556,  day: 7,  startMonth: null,      endMonth: '2027-03' },
     { id: 'fx-kasko-pola',     name: 'Kasko (pola)',         amount: 25000, day: 15, startMonth: '2026-11', endMonth: '2026-11' },
+    // godišnji jednokratni trošak, ne skuplja se kroz lonac (vidi SPEC.md odluku #14)
+    { id: 'fx-osig-nezgoda',   name: 'Osiguranje od nezgode', amount: 730, day: 15, startMonth: '2027-07', endMonth: null, recurrence: 'annual' },
+    { id: 'fx-hrana',          name: 'Hrana',                amount: 35000, day: 11, startMonth: null,      endMonth: null },
   ],
+  // analyze: true → uključeno u "Prosjek po kategoriji" u Analizi (vidi SPEC.md odluku #18).
   variableCategories: [
-    { id: 'var-hrana',       name: 'Hrana',          plan: 30000 },
-    { id: 'var-zivot',       name: 'Život',          plan: 20000 },
-    { id: 'var-gorivo',      name: 'Gorivo',         plan: 15000 },
+    { id: 'var-zivot',       name: 'Život',          plan: 20000, analyze: true },
+    { id: 'var-gorivo',      name: 'Gorivo',         plan: 15000, analyze: true },
     { id: 'var-porez-najam', name: 'Porez na najam', plan: 5880 },
+    { id: 'var-ulaganja',    name: 'Ulaganja (T212)', plan: 22500 },
   ],
+  // nextDue = "YYYY-MM" sljedećeg dospijeća. Prvi ciklus koristi ratu = cilj / preostali mjeseci
+  // do prvog dospijeća (da lonac stigne na cilj bez manjka); nakon dospijeća app automatski
+  // resetira na standardnu ratu = cilj / 12 i nextDue += 12 mj. (vidi SPEC.md odluku #15).
   pots: [
-    { id: 'pot-ulaganja',    name: 'Ulaganja (T212)',                 type: 'savings', monthly: 22500, startMonth: '2026-09' },
-    { id: 'pot-more',        name: 'More',                            type: 'sinking', monthly: 5000, targetAmount: 60000, dueMonth: 7,  startMonth: '2026-09' },
-    { id: 'pot-kasko',       name: 'Kasko',                           type: 'sinking', monthly: 4167, targetAmount: 50000, dueMonth: 11, startMonth: '2026-12' },
-    { id: 'pot-servis',      name: 'Servis auto',                     type: 'sinking', monthly: 3333, targetAmount: 40000, dueMonth: 5,  startMonth: '2026-09' },
-    { id: 'pot-registracija',name: 'Registracija + osiguranje auto',  type: 'sinking', monthly: 3333, targetAmount: 40000, dueMonth: 7,  startMonth: '2026-09' },
-    { id: 'pot-osig-doma',   name: 'Osiguranje doma',                 type: 'sinking', monthly: 501,  targetAmount: 6013,  dueMonth: 6,  startMonth: '2026-09' },
-    { id: 'pot-osig-nezgoda',name: 'Osiguranje od nezgode',           type: 'sinking', monthly: 61,   targetAmount: 730,   dueMonth: 7,  startMonth: '2026-09' },
+    { id: 'pot-more',        name: 'More',                            type: 'sinking', monthly: 5450, targetAmount: 60000, nextDue: '2027-07', startMonth: '2026-09' },
+    { id: 'pot-kasko',       name: 'Kasko',                           type: 'sinking', monthly: 3333, targetAmount: 50000, nextDue: '2027-11', startMonth: '2026-09' },
+    { id: 'pot-servis',      name: 'Servis auto',                     type: 'sinking', monthly: 4444, targetAmount: 40000, nextDue: '2027-05', startMonth: '2026-09' },
+    { id: 'pot-registracija',name: 'Registracija + osiguranje auto',  type: 'sinking', monthly: 3636, targetAmount: 40000, nextDue: '2027-07', startMonth: '2026-09' },
+    { id: 'pot-osig-doma',   name: 'Osiguranje doma',                 type: 'sinking', monthly: 601,  targetAmount: 6013,  nextDue: '2027-06', startMonth: '2026-09' },
   ],
   months: {},
 };
@@ -55,7 +60,11 @@ const HR_MONTHS = ['siječanj','veljača','ožujak','travanj','svibanj','lipanj'
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const eur = (c) => (c / 100).toLocaleString('hr-HR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
-const parseEur = (s) => Math.round(parseFloat(String(s).replace(/\s/g, '').replace(',', '.')) * 100) || 0;
+const parseEur = (s) => {
+  let str = String(s).trim().replace(/\s/g, '');
+  if (str.includes(',')) str = str.replace(/\./g, '').replace(',', '.'); // "1.850,00" (hr format) → "1850.00"
+  return Math.round(parseFloat(str) * 100) || 0;
+};
 
 function mk(y, m) { return `${y}-${String(m).padStart(2, '0')}`; }
 function parseMk(s) { const [y, m] = s.split('-').map(Number); return { y, m }; }
@@ -72,6 +81,7 @@ function todayMk() { const d = new Date(); return mk(d.getFullYear(), d.getMonth
 function activeInMonth(item, month) {
   if (item.startMonth && cmpMk(month, item.startMonth) < 0) return false;
   if (item.endMonth && cmpMk(month, item.endMonth) > 0) return false;
+  if (item.recurrence === 'annual') return parseMk(month).m === parseMk(item.startMonth).m;
   return true;
 }
 
@@ -105,6 +115,156 @@ const Store = {
 };
 
 /* ------------------------------------------------------------------ *
+ * Google Drive sinkronizacija (pohrana v2) — vidi SPEC.md odjeljak 10
+ * ------------------------------------------------------------------ */
+const GOOGLE_CLIENT_ID = '88610669220-vudppbquk5p9nn6dds92kmh1stdta6sa.apps.googleusercontent.com';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const DRIVE_FILENAME = 'budzet.json';
+const DRIVE_BACKUP_KEY = 'budzet_drive_last_backup';
+
+const Drive = {
+  tokenClient: null,
+  token: null,
+  fileId: null,
+  fileModifiedTime: null,
+  status: 'signed-out', // 'signed-out' | 'syncing' | 'signed-in' | 'error'
+  error: null,
+
+  init() {
+    if (!window.google || !google.accounts || !google.accounts.oauth2) return;
+    this.tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: DRIVE_SCOPE,
+      callback: (resp) => this._onToken(resp),
+    });
+    // tiha prijava — bez popupa, radi ako je korisnik već jednom pristao na ovom uređaju
+    this.tokenClient.requestAccessToken({ prompt: '' });
+  },
+
+  signIn() {
+    if (!this.tokenClient) { alert('Google Drive se još učitava — pokušaj opet za par sekundi.'); return; }
+    this.tokenClient.requestAccessToken({ prompt: 'consent' });
+  },
+
+  signOut() {
+    if (this.token && google.accounts?.oauth2?.revoke) google.accounts.oauth2.revoke(this.token, () => {});
+    this.token = null; this.fileId = null; this.status = 'signed-out'; this.error = null;
+    render();
+  },
+
+  async _onToken(resp) {
+    if (resp.error) { this.status = 'signed-out'; render(); return; }
+    this.token = resp.access_token;
+    this.status = 'syncing'; render();
+    try {
+      await this._syncOnConnect();
+      this.status = 'signed-in';
+    } catch (e) {
+      console.warn('Drive sync', e);
+      this.status = 'error'; this.error = e.message;
+    }
+    render();
+  },
+
+  async _authFetch(url, opts = {}) {
+    const res = await fetch(url, { ...opts, headers: { ...(opts.headers || {}), Authorization: `Bearer ${this.token}` } });
+    if (!res.ok) throw new Error(`Drive API ${res.status}`);
+    return res;
+  },
+
+  async _findFile(exactName) {
+    const q = encodeURIComponent(`name='${exactName.replace(/'/g, "\\'")}' and trashed=false`);
+    const res = await this._authFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc`);
+    return (await res.json()).files || [];
+  },
+
+  async _listBackups() {
+    const q = encodeURIComponent(`name contains 'budzet-backup-' and trashed=false`);
+    const res = await this._authFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=100`);
+    return (await res.json()).files || [];
+  },
+
+  async _createFile(name, contentStr) {
+    const boundary = 'budzet_' + uid();
+    const metadata = JSON.stringify({ name });
+    const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n`
+      + `--${boundary}\r\nContent-Type: application/json\r\n\r\n${contentStr}\r\n--${boundary}--`;
+    const res = await this._authFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,modifiedTime', {
+      method: 'POST',
+      headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+      body,
+    });
+    return res.json();
+  },
+
+  async _updateFile(fileId, contentStr) {
+    const res = await this._authFetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&fields=id,modifiedTime`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: contentStr,
+    });
+    return res.json();
+  },
+
+  async _downloadFile(fileId) {
+    const res = await this._authFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+    return res.text();
+  },
+
+  async _deleteFile(fileId) {
+    await this._authFetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, { method: 'DELETE' });
+  },
+
+  async _pruneBackups() {
+    const files = await this._listBackups();
+    for (const f of files.slice(20)) await this._deleteFile(f.id).catch(() => {});
+  },
+
+  /* Pri spajanju: nađi budzet.json na Driveu. Ako je novije od lokalnog → pitaj za učitavanje. */
+  async _syncOnConnect() {
+    const files = await this._findFile(DRIVE_FILENAME);
+    if (!files.length) {
+      const created = await this._createFile(DRIVE_FILENAME, JSON.stringify(state));
+      this.fileId = created.id; this.fileModifiedTime = created.modifiedTime;
+      return;
+    }
+    const f = files[0];
+    this.fileId = f.id; this.fileModifiedTime = f.modifiedTime;
+    const remoteModified = new Date(f.modifiedTime).getTime();
+    const localModified = state.meta.lastModified ? new Date(state.meta.lastModified).getTime() : 0;
+    if (remoteModified > localModified + 5000) {
+      if (confirm(`Na Google Driveu postoji novija verzija podataka (${new Date(f.modifiedTime).toLocaleString('hr-HR')}). Učitati je? (Zamijenit će trenutne podatke na ovom uređaju.)`)) {
+        const text = await this._downloadFile(this.fileId);
+        state = JSON.parse(text);
+        Store.save(state);
+        currentMonth = latestOpenMonth(state);
+      }
+    }
+  },
+
+  /* Pošalji lokalno stanje na Drive. Backup postojeće verzije prije prepisivanja (max 1×/24h). */
+  async push() {
+    if (!this.token || !this.fileId) return;
+    try {
+      const lastBackup = Number(localStorage.getItem(DRIVE_BACKUP_KEY) || 0);
+      if (Date.now() - lastBackup > 24 * 3600 * 1000) {
+        const text = await this._downloadFile(this.fileId).catch(() => null);
+        if (text) {
+          const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+          await this._createFile(`budzet-backup-${stamp}.json`, text);
+          localStorage.setItem(DRIVE_BACKUP_KEY, String(Date.now()));
+          this._pruneBackups();
+        }
+      }
+      const updated = await this._updateFile(this.fileId, JSON.stringify(state));
+      this.fileModifiedTime = updated.modifiedTime;
+    } catch (e) {
+      console.warn('Drive push', e);
+    }
+  },
+};
+
+/* ------------------------------------------------------------------ *
  * Generiranje mjeseca iz konfiguracije
  * ------------------------------------------------------------------ */
 function buildMonth(state, month, openingBalance) {
@@ -134,8 +294,11 @@ function buildMonth(state, month, openingBalance) {
 
   const potSpends = [];
   for (const p of state.pots) {
-    if (p.type === 'sinking' && p.dueMonth === parseMk(month).m && cmpMk(month, p.startMonth) >= 0) {
+    if (p.type === 'sinking' && p.nextDue === month) {
       potSpends.push({ id: uid(), potId: p.id, name: p.name, amount: p.targetAmount, note: 'predložak — uredi stvarni iznos', date: null, done: false });
+      // automatski reset ciklusa: sljedeća rata = cilj / 12, sljedeće dospijeće za godinu dana
+      p.nextDue = addMonths(p.nextDue, 12);
+      p.monthly = Math.round(p.targetAmount / 12);
     }
   }
 
@@ -235,22 +398,16 @@ function freeToSpend(state) {
   return accountBalance(state) - reserved;
 }
 
-/* Projekcija: hoće li sinking lonac biti pun do dueMonth. */
+/* Projekcija: hoće li sinking lonac biti pun do nextDue. */
 function potForecast(state, pot) {
-  const cur = todayMk();
   const bal = potBalance(state, pot.id, latestOpenMonth(state));
   if (pot.type === 'savings') return { bal, shortfall: 0, dueLabel: null };
-  // sljedeći dueMonth (mora biti i nakon što lonac uopće počne)
-  let { y, m } = parseMk(cur);
-  let dueY = y;
-  if (pot.dueMonth <= m) dueY = y + 1;
-  let dueKey = mk(dueY, pot.dueMonth);
-  const firstDue = pot.startMonth && cmpMk(dueKey, pot.startMonth) < 0;
-  if (firstDue) { dueY += 1; dueKey = mk(dueY, pot.dueMonth); }
-  const monthsLeft = (dueY * 12 + pot.dueMonth) - (y * 12 + m);
+  const { y, m } = parseMk(todayMk());
+  const { y: dueY, m: dueM } = parseMk(pot.nextDue);
+  const monthsLeft = (dueY * 12 + dueM) - (y * 12 + m);
   const projected = bal + monthsLeft * pot.monthly;
   const shortfall = Math.max(0, pot.targetAmount - projected);
-  return { bal, projected, shortfall, monthsLeft, dueLabel: monthName(dueKey) };
+  return { bal, projected, shortfall, monthsLeft, dueLabel: monthName(pot.nextDue) };
 }
 
 /* ------------------------------------------------------------------ *
@@ -260,7 +417,10 @@ let state = Store.load();
 let currentMonth = latestOpenMonth(state);
 let currentView = 'dashboard';
 
-function persist() { Store.save(state); }
+function persist() {
+  Store.save(state);
+  if (Drive.status === 'signed-in') Drive.push();
+}
 
 function setMonth(m) { currentMonth = m; render(); }
 function setView(v) {
@@ -359,7 +519,7 @@ function renderDashboard() {
     alerts.length ? el('div', {}, alerts.map(a => el('div', { class: 'row' }, el('span', { class: 'label' }, a)))) : el('p', { class: 'notice' }, 'Sve pod kontrolom.'),
     dueThisWeek.length ? el('div', { style: 'margin-top:10px' },
       el('h2', {}, 'Neplaćeni fiksni'),
-      dueThisWeek.map(d => row(`${d.name} (${d.day}.)`, eur(d.amount)))) : null,
+      dueThisWeek.map(d => row(`${d.name} (${d.day}. u mj.)`, eur(d.amount)))) : null,
   ));
 
   wrap.append(el('button', { class: 'primary', onclick: openHonorarModal }, '+ Unesi honorar'));
@@ -385,7 +545,7 @@ function renderMonth() {
     row('Prihodi (stvarno)', eur(roll.incomeActual)),
     row('Fiksni (stvarno)', '−' + eur(roll.fixedActual)),
     row('Varijabilno (stvarno)', '−' + eur(roll.varActual)),
-    row('Ulaganja + sinking računi', '−' + eur(roll.savingsContribActual + roll.sinkingSpend)),
+    row('Sinking računi (godišnji)', '−' + eur(roll.sinkingSpend)),
     row('Ostatak', eur(roll.closingBalance)),
     M.closed ? el('span', { class: 'pill warn' }, 'zaključen') : el('button', { class: 'ghost', onclick: () => { M.closed = true; persist(); render(); } }, 'Označi zaključenim'),
   ));
@@ -393,7 +553,9 @@ function renderMonth() {
   // Prihodi
   const incCard = el('div', { class: 'card' }, el('h2', {}, 'Prihodi'));
   for (const i of M.income) {
-    incCard.append(checkline(i.received, `${i.name}`, eur(i.actual ?? i.planned), (v) => { i.received = v; if (v && i.date == null) i.date = new Date().toISOString(); persist(); render(); }));
+    incCard.append(checklineAmount(i.received, i.name, i.actual ?? i.planned,
+      (v) => { i.received = v; if (v && i.date == null) i.date = new Date().toISOString(); persist(); render(); },
+      (amt) => { i.actual = amt; persist(); render(); }));
   }
   for (const h of M.honorari) incCard.append(row(`Honorar → račun`, eur(h.toAccount), `ulaganja ${eur(h.toInvest)}`));
   wrap.append(incCard);
@@ -433,7 +595,9 @@ function renderMonth() {
   // Doprinosi loncima
   const pcCard = el('div', { class: 'card' }, el('h2', {}, 'Uplate u lonce'));
   for (const pc of M.potContribs) {
-    pcCard.append(checkline(pc.paid, pc.name, '−' + eur(pc.actual ?? pc.planned), (v) => { pc.paid = v; persist(); render(); }));
+    pcCard.append(checklineAmount(pc.paid, pc.name, pc.actual ?? pc.planned,
+      (v) => { pc.paid = v; persist(); render(); },
+      (amt) => { pc.actual = amt; persist(); render(); }));
   }
   wrap.append(pcCard);
 
@@ -462,6 +626,20 @@ function checkline(checked, label, amount, onToggle) {
     el('span', { class: 'label', style: 'flex:1' }, label),
     el('span', { class: 'amount' }, amount));
   return line;
+}
+
+/* Kao checkline, ali s uređivim iznosom (kad stvarni iznos odstupa od planiranog). */
+function checklineAmount(checked, label, amountCents, onToggle, onAmount) {
+  const cb = el('input', { type: 'checkbox' });
+  cb.checked = !!checked;
+  cb.addEventListener('change', () => onToggle(cb.checked));
+  const amt = el('input', { type: 'text', inputmode: 'decimal', style: 'width:100px;text-align:right;flex:none' });
+  amt.value = (amountCents / 100).toLocaleString('hr-HR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const commit = () => onAmount(parseEur(amt.value));
+  amt.addEventListener('change', commit);
+  amt.addEventListener('keydown', (e) => { if (e.key === 'Enter') { commit(); amt.blur(); } });
+  return el('div', { class: 'checkline' + (checked ? ' paid' : '') }, cb,
+    el('span', { class: 'label', style: 'flex:1' }, label), amt);
 }
 
 /* ---------- Lonci ---------- */
@@ -503,14 +681,19 @@ function renderAnalysis() {
   }
   wrap.append(el('div', { class: 'card' }, el('h2', {}, 'Potrošnja po mjesecima'), chart, el('div', { style: 'height:20px' })));
 
-  // prosjek po kategoriji
+  // prosjek po kategoriji (samo kategorije koje ima smisla analizirati — vidi odluku #18)
   const catCard = el('div', { class: 'card' }, el('h2', {}, 'Prosjek po kategoriji (varijabilno)'));
-  for (const c of state.variableCategories) {
+  for (const c of state.variableCategories.filter(c => c.analyze)) {
     let tot = 0, n = 0;
     for (const m of months) { const mc = state.months[m].variable.find(v => v.catId === c.id); if (mc) { tot += sum(mc.entries, e => e.amount); n++; } }
     catCard.append(row(c.name, n ? eur(Math.round(tot / n)) + '/mj' : '—'));
   }
   wrap.append(catCard);
+
+  // ukupno uloženo (Ulaganja T212) kroz sve mjesece — nastavak lonca-ideje, sad kao varijabilna kategorija
+  let investedTotal = 0;
+  for (const m of months) { const mc = state.months[m].variable.find(v => v.catId === 'var-ulaganja'); if (mc) investedTotal += sum(mc.entries, e => e.amount); }
+  wrap.append(el('div', { class: 'card' }, el('h2', {}, 'Ulaganja (T212)'), row('Ukupno uloženo do sada', eur(investedTotal))));
 
   // top 5 stavki ovog mjeseca
   const M = state.months[currentMonth];
@@ -548,23 +731,42 @@ function renderAnalysis() {
 function renderSettings() {
   const wrap = el('div');
   wrap.append(el('div', { class: 'card' },
+    el('h2', {}, 'Google Drive sinkronizacija'),
+    driveStatusNotice(),
+    el('div', { class: 'inline-add', style: 'margin-top:10px' },
+      (Drive.status === 'signed-out' || Drive.status === 'error')
+        ? el('button', { class: 'primary', onclick: () => Drive.signIn() }, 'Prijavi se')
+        : el('button', { class: 'ghost', onclick: () => Drive.signOut() }, 'Odjava'),
+      Drive.status === 'signed-in'
+        ? el('button', { class: 'ghost', onclick: async () => { await Drive.push(); render(); } }, 'Spremi na Drive sada')
+        : null,
+    ),
+  ));
+
+  wrap.append(el('div', { class: 'card' },
     el('h2', {}, 'Podaci'),
     row('Prvi mjesec', monthName(state.settings.startMonth)),
     row('Početno stanje', eur(state.settings.startingBalance)),
     el('div', { class: 'inline-add', style: 'margin-top:10px' },
       el('button', { class: 'ghost', onclick: () => Store.exportJson(state) }, 'Izvezi JSON'),
       el('button', { class: 'ghost', onclick: importJson }, 'Uvezi JSON'),
-      el('button', { class: 'ghost', onclick: () => { if (confirm('Obrisati sve i vratiti seed?')) { localStorage.removeItem(KEY); location.reload(); } } }, 'Reset'),
+      el('button', { class: 'ghost', onclick: () => { if (confirm('Ovo će TRAJNO izbrisati sve tvoje podatke (sve mjesece, unose, plaćanja) i vratiti app na početne postavke. Ovo se ne može poništiti — ako nisi siguran, prvo napravi "Izvezi JSON". Jesi li siguran da želiš nastaviti?')) { localStorage.removeItem(KEY); location.reload(); } } }, 'Reset'),
     ),
   ));
 
-  wrap.append(listCard('Prihodi (mjesečni)', state.income.recurring.map(r => `${r.name} · ${eur(r.amount)} · ${r.day}.`)));
-  wrap.append(listCard('Fiksni troškovi', state.fixedCosts.map(f => `${f.name} · ${eur(f.amount)} · ${f.day}.${f.endMonth ? ' · do ' + f.endMonth : ''}`)));
+  wrap.append(listCard('Prihodi (mjesečni)', state.income.recurring.map(r => `${r.name} · ${eur(r.amount)} · ${r.day}. u mj.`)));
+  wrap.append(listCard('Fiksni troškovi', state.fixedCosts.map(f => `${f.name} · ${eur(f.amount)} · ${f.day}. u mj.${f.endMonth ? ' · do ' + f.endMonth : ''}`)));
   wrap.append(listCard('Varijabilne kategorije', state.variableCategories.map(c => `${c.name} · plan ${eur(c.plan)}`)));
-  wrap.append(listCard('Lonci', state.pots.map(p => `${p.name} · ${eur(p.monthly)}/mj · ${p.type}${p.dueMonth ? ' · dospijeće ' + HR_MONTHS[p.dueMonth - 1] : ''}`)));
+  wrap.append(listCard('Lonci', state.pots.map(p => `${p.name} · ${eur(p.monthly)}/mj · ${p.type}${p.nextDue ? ' · dospijeće ' + monthName(p.nextDue) : ''}`)));
 
   wrap.append(el('p', { class: 'notice' }, 'Uređivanje stavki u postavkama — sljedeća iteracija. Za sad se mijenja kroz Izvoz/Uvoz JSON ili izravno u kodu (SEED).'));
   return wrap;
+}
+function driveStatusNotice() {
+  if (Drive.status === 'signed-in') return el('p', { class: 'notice' }, `Povezano. Zadnja sinkronizacija: ${Drive.fileModifiedTime ? new Date(Drive.fileModifiedTime).toLocaleString('hr-HR') : '—'}`);
+  if (Drive.status === 'syncing') return el('p', { class: 'notice' }, 'Spajanje na Drive…');
+  if (Drive.status === 'error') return el('p', { class: 'notice' }, 'Greška pri spajanju na Drive: ' + (Drive.error || '?'));
+  return el('p', { class: 'notice' }, 'Nije povezano. Podaci se čuvaju samo lokalno, u ovom pregledniku.');
 }
 function listCard(title, lines) {
   return el('div', { class: 'card' }, el('h2', {}, title), lines.map(l => el('div', { class: 'row' }, el('span', { class: 'label' }, l))));
@@ -596,7 +798,10 @@ function openHonorarModal() {
         if (!g) return closeModal();
         const M = state.months[currentMonth];
         M.honorari.push({ id: uid(), gross: g, toInvest: inv, toAccount: g - inv, date: new Date().toISOString(), note: '' });
-        if (inv > 0) M.potContribs.push({ potId: 'pot-ulaganja', name: 'Ulaganja (T212) — honorar', planned: inv, actual: inv, paid: true });
+        if (inv > 0) {
+          const ulaganja = M.variable.find(v => v.catId === 'var-ulaganja');
+          ulaganja.entries.push({ id: uid(), amount: inv, note: 'honorar', date: new Date().toISOString() });
+        }
         persist(); closeModal(); render();
       } }, 'Spremi'),
     ),
@@ -624,3 +829,10 @@ render();
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
+
+/* Google Identity Services skripta se učitava async — pričekaj da bude spremna. */
+(function waitForGoogle(tries) {
+  if (window.google && google.accounts && google.accounts.oauth2) { Drive.init(); return; }
+  if (tries <= 0) return;
+  setTimeout(() => waitForGoogle(tries - 1), 100);
+})(50);

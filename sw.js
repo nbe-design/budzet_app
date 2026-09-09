@@ -1,5 +1,5 @@
 /* Service worker — offline cache. Podigni CACHE verziju pri promjeni datoteka. */
-const CACHE = 'budzet-v1';
+const CACHE = 'budzet-v2';
 const ASSETS = [
   '.',
   'index.html',
@@ -24,10 +24,14 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const { request } = e;
   if (request.method !== 'GET') return;
-  // network-first za navigaciju, cache-first za ostalo
-  if (request.mode === 'navigate') {
-    e.respondWith(fetch(request).catch(() => caches.match('index.html')));
-    return;
-  }
-  e.respondWith(caches.match(request).then((hit) => hit || fetch(request)));
+  // network-first za sve (uvijek svježa verzija kad je mreža dostupna),
+  // cache samo kao fallback kad je offline. Ako zatreba čist cache-first
+  // za pravu offline PWA upotrebu, vrati staru verziju iz git povijesti.
+  e.respondWith(
+    fetch(request).then((res) => {
+      const copy = res.clone();
+      caches.open(CACHE).then((c) => c.put(request, copy));
+      return res;
+    }).catch(() => caches.match(request).then((hit) => hit || (request.mode === 'navigate' ? caches.match('index.html') : undefined)))
+  );
 });
