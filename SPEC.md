@@ -52,10 +52,11 @@ istovremeno na dva uređaja.
 | Izvoz CSV/Excel | 🚧 samo JSON izvoz/uvoz zasad |
 | Google Drive sync | ✅ gotovo, potvrđeno uživo (odjeljak 10) |
 | PWA ikone | ✅ gotovo (`icons/icon-192.png`, `icon-512.png`) |
+| Hosting (GitHub Pages) | ✅ gotovo — https://nbe-design.github.io/budzet_app/ — potvrđeno na mobitelu |
 
-**Sljedeći korak:** preostaje: hosting (GitHub/Cloudflare Pages, pa dodati taj origin u
-OAuth klijent na projektu "My First Project" — vidi odjeljak 10), CSV/Excel izvoz,
-uređivanje postavki kroz UI (za sad samo Izvoz/Uvoz JSON).
+**Sljedeći korak:** app radi na računalu i mobitelu, na javnoj adresi, sa Google Drive
+sinkronizacijom. Preostaje (nije hitno): "Add to Home Screen" na mobitelu za pravi
+app-like osjećaj, CSV/Excel izvoz, uređivanje postavki kroz UI (za sad samo Izvoz/Uvoz JSON).
 
 ---
 
@@ -547,14 +548,15 @@ nije hitno, ne utječe na rad.
 
 ### Preostali koraci za bilo koga koji nastavlja ovo
 
-1. Kad se app hostira (GitHub Pages / Cloudflare Pages), dodati tu adresu kao **novi**
-   Authorized JavaScript origin u istom OAuth klijentu (Google Cloud Console →
-   Credentials → uredi klijent) — postojeći `http://localhost:8761` može ostati
-   za lokalni dev.
-2. Ako se port lokalnog servera opet promijeni, ili se doda origin, treba i tu
-   dodati u Authorized origins, inače prijava puca s "redirect_uri_mismatch"-like
-   greškom (Google odbije popup).
-3. `drive.file` scope znači: app vidi samo `budzet.json` (i backup datoteke) koje je
+1. ✅ Hostano na GitHub Pages: **https://nbe-design.github.io/budzet_app/** — dodano
+   kao Authorized JavaScript origin (`https://nbe-design.github.io`) na istom OAuth
+   klijentu ("My First Project" → Clients → Budget-app). `http://localhost:8761`
+   ostaje dodatno za lokalni dev.
+2. Repo: **https://github.com/nbe-design/budzet_app** (public, GitHub Pages iz
+   `master` grane, root foldera).
+3. Ako se port lokalnog servera opet promijeni, ili se doda još jedan origin, treba i
+   tu dodati u Authorized origins, inače prijava puca s "access_denied" greškom.
+4. `drive.file` scope znači: app vidi samo `budzet.json` (i backup datoteke) koje je
    sam kreirao — ne cijeli Nikolin Drive. To je namjerno (odluka iz odjeljka 1).
 
 ### Referenca — originalni plan (za usporedbu)
