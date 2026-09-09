@@ -772,7 +772,7 @@ function renderSettings() {
   wrap.append(el('div', { class: 'card' },
     el('h2', {}, 'Podaci'),
     row('Prvi mjesec', monthName(state.settings.startMonth)),
-    row('Početno stanje', eur(state.settings.startingBalance)),
+    startBalanceRow(),
     el('div', { class: 'inline-add', style: 'margin-top:10px' },
       el('button', { class: 'ghost', onclick: () => Store.exportJson(state) }, 'Izvezi JSON'),
       el('button', { class: 'ghost', onclick: () => Store.exportCsv(state) }, 'Izvezi CSV'),
@@ -789,6 +789,22 @@ function renderSettings() {
   wrap.append(renderPotsSettings());
 
   return wrap;
+}
+
+function startBalanceRow() {
+  if (isEditing('meta', 'sb')) {
+    const amt = el('input', { type: 'text', inputmode: 'decimal', value: eurPlain(state.settings.startingBalance), placeholder: '0,00' });
+    const save = () => {
+      state.settings.startingBalance = parseEur(amt.value);
+      ensureMonthChain(state, latestOpenMonth(state)); // preračunaj openingBalance kroz već otvorene mjesece
+      persist(); cancelEdit();
+    };
+    return el('div', { class: 'field' }, el('label', {}, 'Početno stanje (€)'), amt, formActions(save));
+  }
+  return el('div', { class: 'row' },
+    el('span', { class: 'label' }, 'Početno stanje'),
+    el('span', {}, eur(state.settings.startingBalance) + '  ',
+      el('button', { class: 'ghost', style: 'padding:2px 8px', onclick: () => startEdit('meta', 'sb') }, 'Uredi')));
 }
 
 /* --- generički helperi za uređivanje popisa u Postavkama --- */
