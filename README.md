@@ -6,14 +6,12 @@ Osobna PWA za planiranje i praćenje mjesečnog budžeta. Zamjena za Excel na mo
 
 ## Pokretanje lokalno
 
-Treba se posluživati preko HTTP-a (service worker i `type=module` ne rade s `file://`):
+**Ne otvarati `index.html` dvoklikom** (`file://` — JavaScript se ne izvršava kako treba,
+ništa se ne može kliknuti). Mora ići preko HTTP-a.
 
-```bash
-cd "budzet"
-python -m http.server 8000
-```
-
-Otvori `http://localhost:8000`.
+- **Najlakše:** dvoklik na **`Pokreni budžet.bat`** → pokreće lokalni server i otvara
+  preglednik na `http://localhost:8753`. Zaustavljanje: zatvori crni prozor.
+- **Ručno:** `cd budzet` pa `python -m http.server 8753`, otvori `http://localhost:8753`.
 
 ## Stanje
 
