@@ -47,7 +47,7 @@ istovremeno na dva uređaja.
 | Ekran "Mjesec" | ✅ gotovo |
 | Ekran "Lonci" | ✅ gotovo |
 | Ekran "Analiza" (grafovi) | ✅ gotovo (osnovno) |
-| Ekran "Postavke" | ✅ gotovo — pregled + izvoz/uvoz JSON + **uređivanje kroz UI** (dodaj/uredi/obriši za prihode, fiksne troškove, varijabilne kategorije, lonce) |
+| Ekran "Postavke" | ✅ gotovo — pregled + izvoz/uvoz JSON + **uređivanje kroz UI** (dodaj/uredi/obriši za prihode, fiksne troškove, varijabilne kategorije, lonce, + uredivo početno stanje računa) |
 | Unos honorara (split u ulaganja) | ✅ gotovo |
 | Izvoz CSV/Excel | ✅ gotovo — CSV (ne Excel binarno, ali otvara se izravno u Excelu) |
 | Google Drive sync | ✅ gotovo, potvrđeno uživo (odjeljak 10) |
@@ -87,6 +87,9 @@ budzet/
   samo bez Drive dijela.
 - Grafovi: ručno crtani SVG, bez vanjskih biblioteka (offline-first).
 - Novac: rad u centima (integer) gdje god moguće da se izbjegne float greška; prikaz s 2 decimale.
+  `parseEur()` mora prvo skinuti sve točke (tisućice, hr-HR format "1.900,00") pa tek onda
+  zamijeniti zarez točkom — obrnut redoslijed (ili preskakanje tog koraka) tiho krivo parsira
+  sve iznose ≥1.000 € (npr. "1.850,00" → 18,50 umjesto 1.850,00). Popravljeno 2026-09-09.
 
 ---
 
@@ -479,9 +482,9 @@ prazne — ne stvara se rupa u računu.
   Inline unos pojedinačnih troškova (Enter-za-dodati).
 - **Plaćeno / nije plaćeno** kvačica po stavci.
 - **Unos honorara** → pita split u ulaganja, ostatak na račun.
-- **Dashboard**: slobodno za potrošiti • dnevni budžet do kraja mjeseca • projekcija
-  kraja mjeseca • što dospijeva ovaj tjedan • je li plaća unesena • stanja lonaca s
-  upozorenjima na manjak.
+- **Dashboard**: slobodno za potrošiti • preostalo za "Život" (#21) • projekcija
+  kraja mjeseca • predviđeno stanje prije iduće plaće (#20) • što dospijeva ovaj
+  tjedan • je li plaća unesena • stanja lonaca s upozorenjima na manjak.
 - **Analiza**: potrošnja po mjesecima (stupčasti graf) • prosjek po kategoriji •
   top 5 stavki mjeseca • plan vs. ostvareno kumulativno kroz godinu.
 - **Ručno otvaranje novog mjeseca**; prošli uredivi, označeni "zaključen".
@@ -490,6 +493,12 @@ prazne — ne stvara se rupa u računu.
   (uklj. godišnje/annual), varijabilne kategorije (uklj. `analyze` flag), lonce
   (uklj. tip sinking/savings). Mijenja samo predloške — ne utječe retroaktivno na
   već otvorene mjesece (isto ponašanje kao i prije, kroz JSON uređivanje).
+  Uz to, **početno stanje računa** (`settings.startingBalance`) je uredivo —
+  uređivanje pokrene `ensureMonthChain()` pa se `openingBalance` već otvorenih
+  mjeseci ispravno preračuna (za slučaj da se stanje unosi nakon što je tracking
+  već počeo, npr. Nikolin stvarni slučaj 2026-09-09: postavio 847,99 €, pa to
+  spustio na 147,99 € kad se sjetio da je 700 € najma već uključeno, i taj iznos
+  ručno čekirao kao primljen prihod da ne duplira).
 - **Podaci**: v1 localStorage; v2 jedan JSON u Google Driveu (atomarno + timestampirani backupi).
 
 ### Izvan v1 (moguće kasnije)
@@ -501,7 +510,7 @@ prazne — ne stvara se rupa u računu.
 
 ---
 
-## 10. Google Drive sync — status: implementirano (2026-09-09), čeka test uživo
+## 10. Google Drive sync — status: gotovo, potvrđeno uživo (2026-09-09)
 
 Google Cloud projekt `budzet-app` postoji, OAuth consent screen (External, Testing,
 Nikola dodan kao test user), Drive API omogućen, OAuth Client ID kreiran s
@@ -517,11 +526,12 @@ dolazi od Authorized origins provjere na Googleovoj strani, ne od skrivanja ID-a
   vidi kraj `app.js`) pokuša `requestAccessToken({prompt:''})` — bez popupa, radi
   samo ako je korisnik već jednom pristao na tom uređaju/pregledniku. Prvi put ne
   uspijeva (nema popupa još) — normalno, treba klik na "Prijavi se".
-- **Postavke → "Prijavi se"** (`Drive.signIn()`) — otvara Googleov consent popup
-  (stvaran klik, nije blokiran popup-blockerom). Test usera će dočekati
-  "Google hasn't verified this app" ekran (jer je app u Testing modu) — klik na
-  "Advanced" → "Go to Budžet (unsafe)" je normalan korak, ne stvarna opasnost
-  (app je vlastita, `drive.file` scope je uskoro-ograničen).
+- **Postavke → "Prijavi se"** (`Drive.signIn()`) — otvara Googleov popup, **bez**
+  forsiranog `prompt:'consent'` (maknuto 2026-09-09 — ranije je tjeralo puni "app
+  nije provjerena" ekran pri SVAKOM kliku, iritantno na mobitelu). Sad Google
+  prikaže samo što je nužno: prvi put puni consent + "Google hasn't verified this
+  app" ekran (klik "Advanced" → "Go to Budžet (unsafe)", normalno za Testing app),
+  a nakon toga samo brzi odabir računa.
 - **Pri spajanju** (`_syncOnConnect`): traži `budzet.json` na Driveu. Ne postoji →
   kreira ga sa trenutnim lokalnim stanjem. Postoji i **novije** je od lokalnog →
   pita (confirm dijalog) da učita Drive verziju (zamjenjuje lokalnu).
@@ -590,6 +600,38 @@ nije hitno, ne utječe na rad.
 
 ## 11. Nastavak na drugom računalu
 
-Cijela mapa `budzet/` je samodostatna. Kopiraj je na drugo računalo (ili kroz Git /
-Drive) i nastavi. `SPEC.md` + `data-seed.json` sadrže sve odluke i podatke.
-Reci Claudeu: *"nastavljam gradnju budžet aplikacije, pročitaj SPEC.md"*.
+### Ako samo želiš KORISTITI app (unositi troškove, gledati stanje) — ne treba USB
+
+App je već hostana i sinkronizirana: otvori **https://nbe-design.github.io/budzet_app/**
+u bilo kojem pregledniku na bilo kojem uređaju, Postavke → "Prijavi se" (Google Drive),
+i svi podaci (stvarni Nikolini, ne seed) se učitaju automatski. Folder na USB-u nije
+potreban za ovo — samo za nastavak RAZVOJA (da Claude Code može uređivati kod).
+
+### Ako nastavljaš RAZVOJ koda na drugom računalu (USB ili Git)
+
+1. **Kopiraj cijelu mapu `budzet/`** (uklj. skriveni `.git` folder ako želiš puni git
+   log ponijeti) na USB, pa na drugo računalo. Alternativa bez USB-a: `git clone
+   https://github.com/nbe-design/budzet_app.git` — repo je već public na GitHubu,
+   sve do zadnjeg commita je tamo (pushano 2026-09-09).
+2. **Python treba biti instaliran** na tom računalu za `Pokreni budžet.bat` (lokalni
+   dev server). Ako nije: `winget install --id Python.Python.3.13 -e --source winget
+   --accept-source-agreements --accept-package-agreements`. Pažljivo — Windows ima
+   "python" App execution alias koji glumi da je Python instaliran a nije; bat
+   datoteka to već zaobilazi tražeći po punim putanjama (vidi njen sadržaj).
+3. **Port 8761** je već hardkodiran u `Pokreni budžet.bat` i već je odobren kao
+   Authorized JavaScript origin za Google Drive OAuth (`http://localhost:8761`,
+   na projektu "My First Project" / klijent "Budget-app" — vidi odjeljak 10). Dok
+   god bat datoteka ostane na tom portu, Drive prijava radi lokalno bez dodatnog
+   Google Cloud podešavanja. Ako se port promijeni, treba dodati novi origin.
+4. Nakon uređivanja: `git add -A && git commit -m "..." && git push` — GitHub Pages
+   se automatski redeploya iz `master` grane u par minuta (nema build koraka).
+5. Reci Claudeu: *"nastavljam gradnju budžet aplikacije, pročitaj SPEC.md"* — ovaj
+   dokument + `data-seed.json` sadrže sve odluke, brojke i "zamke" na koje se već
+   naletjelo, da se ne ponavlja isti posao.
+
+### Ključni linkovi (za brzu referencu)
+
+- Live app: https://nbe-design.github.io/budzet_app/
+- GitHub repo: https://github.com/nbe-design/budzet_app
+- Google Cloud projekt s OAuth klijentom: "My First Project" (`handy-cell-508119-a3`)
+  — **ne** "budzet-app" projekt (taj je prazan, zabuna iz odjeljka 10)
