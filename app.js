@@ -871,9 +871,8 @@ function startBalanceRow() {
     return el('div', { class: 'field' }, el('label', {}, 'Početno stanje (€)'), amt, formActions(save));
   }
   return el('div', { class: 'row' },
-    el('span', { class: 'label' }, 'Početno stanje'),
-    el('span', {}, eur(state.settings.startingBalance) + '  ',
-      el('button', { class: 'ghost', style: 'padding:2px 8px', onclick: () => startEdit('meta', 'sb') }, 'Uredi')));
+    el('span', { class: 'label' }, `Početno stanje: ${eur(state.settings.startingBalance)}`),
+    el('button', { class: 'ghost', style: 'padding:2px 8px;flex:none', onclick: () => startEdit('meta', 'sb') }, 'Uredi'));
 }
 
 /* --- generički helperi za uređivanje popisa u Postavkama --- */
