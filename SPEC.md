@@ -562,14 +562,32 @@ dolazi od Authorized origins provjere na Googleovoj strani, ne od skrivanja ID-a
   app" ekran (klik "Advanced" → "Go to Budžet (unsafe)", normalno za Testing app),
   a nakon toga samo brzi odabir računa.
 - **Pri spajanju** (`_syncOnConnect`): traži `budzet.json` na Driveu. Ne postoji →
-  kreira ga sa trenutnim lokalnim stanjem. Postoji i **novije** je od lokalnog →
-  pita (confirm dijalog) da učita Drive verziju (zamjenjuje lokalnu).
+  kreira ga sa trenutnim lokalnim stanjem. Postoji → usporedi njegov `modifiedTime` s
+  `DRIVE_MTIME_KEY` (verzija s kojom je OVAJ uređaj zadnji put usklađen, u localStorage).
+  Isti → ništa. Različit → confirm dijalog da učita Drive verziju (dvije poruke: obična
+  "novija verzija" ili upozorenje ako uređaj ima i novije lokalne promjene). Nakon
+  učitavanja/svjesnog preskoka spremi novi `DRIVE_MTIME_KEY` pa ne pita opet za istu verziju.
 - **Svako spremanje** (`persist()`) dok je `Drive.status === 'signed-in'` → i
   `Drive.push()` u pozadini (fire-and-forget, ne blokira UI). Prije prepisivanja
   postojeće Drive datoteke pravi se `budzet-backup-YYYYMMDD...json` kopija —
-  najviše 1×/24h (da ne spamira Drive), stare backupove iznad 20 briše.
+  najviše 1×/24h (da ne spamira Drive), stare backupove iznad 20 briše. Nakon uspješnog
+  pusha zapiše novi `modifiedTime` u `DRIVE_MTIME_KEY`.
 - **"Spremi na Drive sada"** gumb u Postavkama — ručni forsirani push.
+- **"Učitaj s Drivea"** gumb u Postavkama (dodano 2026-09-10) — ručni forsirani pull,
+  zamjenjuje lokalne podatke. Escape hatch kad automatski dijalog ne iskoči.
 - **Odjava** — revoke tokena, sljedeći put treba ponovni klik "Prijavi se".
+
+### Zamka: startup `persist()` je stampao `meta.lastModified` na svakom učitavanju (popravljeno 2026-09-10)
+
+Init blok na dnu `app.js` je bezuvjetno zvao `persist()` nakon `ensureMonthChain`. To je
+na **svakom otvaranju stranice** postavljalo `state.meta.lastModified = now`. Na svježem
+uređaju (prazan localStorage → seed) rezultat: lokalni seed dobije "sadašnji" timestamp,
+`_syncOnConnect` vidi lokalno kao novije od stvarnih podataka na Driveu i **ne ponudi
+učitavanje**. Nikolin slučaj 2026-09-10: mobitel radi, računalo zapelo na seed ("Početno
+stanje 0,00 €") iako je Drive imao prave podatke. Popravak: (a) `if (hadLocalOnLoad)
+persist()` — svjež uređaj ne piše lokalno prije nego Drive dobije priliku; (b)
+`_syncOnConnect` se više ne oslanja na `meta.lastModified` za "je li se Drive promijenio"
+nego na `DRIVE_MTIME_KEY`; (c) ručni "Učitaj s Drivea" gumb.
 
 ### Testirano
 

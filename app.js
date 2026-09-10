@@ -144,6 +144,10 @@ const GOOGLE_CLIENT_ID = '88610669220-vudppbquk5p9nn6dds92kmh1stdta6sa.apps.goog
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const DRIVE_FILENAME = 'budzet.json';
 const DRIVE_BACKUP_KEY = 'budzet_drive_last_backup';
+// modifiedTime verzije na Driveu s kojom je ovaj uređaj zadnji put usklađen (push ili pull/preskoči).
+// Sluzi da _syncOnConnect zna je li se Drive promijenio otkad smo zadnji put gledali, neovisno o
+// nepouzdanom meta.lastModified (koji se zna stampati i kad se nista sadržajno nije promijenilo).
+const DRIVE_MTIME_KEY = 'budzet_drive_synced_mtime';
 
 const Drive = {
   tokenClient: null,
@@ -245,26 +249,52 @@ const Drive = {
     for (const f of files.slice(20)) await this._deleteFile(f.id).catch(() => {});
   },
 
-  /* Pri spajanju: nađi budzet.json na Driveu. Ako je novije od lokalnog → pitaj za učitavanje. */
+  /* Pri spajanju: nađi budzet.json na Driveu. Ako se Drive promijenio otkad je ovaj uređaj
+     zadnji put usklađen → pitaj za učitavanje. */
   async _syncOnConnect() {
     const files = await this._findFile(DRIVE_FILENAME);
     if (!files.length) {
       const created = await this._createFile(DRIVE_FILENAME, JSON.stringify(state));
       this.fileId = created.id; this.fileModifiedTime = created.modifiedTime;
+      localStorage.setItem(DRIVE_MTIME_KEY, created.modifiedTime);
       return;
     }
     const f = files[0];
     this.fileId = f.id; this.fileModifiedTime = f.modifiedTime;
+
+    const known = localStorage.getItem(DRIVE_MTIME_KEY);
+    if (f.modifiedTime === known) return; // već smo usklađeni s ovom verzijom Drivea
+
     const remoteModified = new Date(f.modifiedTime).getTime();
     const localModified = state.meta.lastModified ? new Date(state.meta.lastModified).getTime() : 0;
-    if (remoteModified > localModified + 5000) {
-      if (confirm(`Na Google Driveu postoji novija verzija podataka (${new Date(f.modifiedTime).toLocaleString('hr-HR')}). Učitati je? (Zamijenit će trenutne podatke na ovom uređaju.)`)) {
-        const text = await this._downloadFile(this.fileId);
-        state = JSON.parse(text);
-        Store.save(state);
-        currentMonth = latestOpenMonth(state);
-      }
+    const localMaybeNewer = localModified > remoteModified + 5000;
+    const when = new Date(f.modifiedTime).toLocaleString('hr-HR');
+    const msg = localMaybeNewer
+      ? `Na Google Driveu je druga verzija podataka (${when}), a ovaj uređaj ima novije lokalne promjene.\n\nUčitati verziju s Drivea? (Poništit će lokalne promjene na ovom uređaju.)`
+      : `Na Google Driveu je novija verzija podataka (${when}).\n\nUčitati je? (Zamijenit će trenutne podatke na ovom uređaju.)`;
+    if (confirm(msg)) {
+      const text = await this._downloadFile(this.fileId);
+      state = JSON.parse(text);
+      Store.save(state);
+      currentMonth = latestOpenMonth(state);
     }
+    localStorage.setItem(DRIVE_MTIME_KEY, f.modifiedTime); // usklađeni (učitali ili svjesno preskočili)
+  },
+
+  /* Ručno povlačenje s Drivea — zamjenjuje lokalne podatke. Escape hatch kad automatski
+     dijalog ne iskoči (npr. lokalni timestamp je zbog nekog razloga noviji od Drivea). */
+  async pull() {
+    if (!this.token) { alert('Prvo se prijavi na Google Drive.'); return; }
+    const files = await this._findFile(DRIVE_FILENAME);
+    if (!files.length) { alert('Na Google Driveu još nema spremljene datoteke budzet.json.'); return; }
+    const f = files[0];
+    const text = await this._downloadFile(f.id);
+    state = JSON.parse(text);
+    Store.save(state);
+    this.fileId = f.id; this.fileModifiedTime = f.modifiedTime;
+    localStorage.setItem(DRIVE_MTIME_KEY, f.modifiedTime);
+    currentMonth = latestOpenMonth(state);
+    render();
   },
 
   /* Pošalji lokalno stanje na Drive. Backup postojeće verzije prije prepisivanja (max 1×/24h). */
@@ -283,6 +313,7 @@ const Drive = {
       }
       const updated = await this._updateFile(this.fileId, JSON.stringify(state));
       this.fileModifiedTime = updated.modifiedTime;
+      localStorage.setItem(DRIVE_MTIME_KEY, updated.modifiedTime); // ovaj uređaj je sad usklađen s Driveom
     } catch (e) {
       console.warn('Drive push', e);
     }
@@ -448,6 +479,7 @@ function projectedRealEndOfMonth(state, month) {
 /* ------------------------------------------------------------------ *
  * Stanje aplikacije / render
  * ------------------------------------------------------------------ */
+const hadLocalOnLoad = localStorage.getItem(KEY) != null;
 let state = Store.load();
 let currentMonth = latestOpenMonth(state);
 let currentView = 'dashboard';
@@ -776,6 +808,9 @@ function renderSettings() {
       Drive.status === 'signed-in'
         ? el('button', { class: 'ghost', onclick: async () => { await Drive.push(); render(); } }, 'Spremi na Drive sada')
         : null,
+      Drive.status === 'signed-in'
+        ? el('button', { class: 'ghost', onclick: () => { if (confirm('Učitati podatke s Google Drivea? Zamijenit će trenutne podatke na ovom uređaju (lokalne nespremljene promjene se gube).')) Drive.pull().catch(e => alert('Greška pri učitavanju: ' + e.message)); } }, 'Učitaj s Drivea')
+        : null,
     ),
   ));
 
@@ -1023,7 +1058,9 @@ document.getElementById('modal-root').addEventListener('click', e => { if (e.tar
  * ------------------------------------------------------------------ */
 ensureMonthChain(state, state.settings.startMonth);
 if (!Object.keys(state.months).length) ensureMonthChain(state, state.settings.startMonth);
-persist();
+// Ne spremaj (i ne stampaj meta.lastModified) na svježem uređaju prije nego Drive dobije priliku
+// sinkronizirati — inače lokalni seed dobije "sadašnji" timestamp i pobijedi stvarne podatke s Drivea.
+if (hadLocalOnLoad) persist();
 currentMonth = latestOpenMonth(state);
 
 document.getElementById('btn-month-prev').addEventListener('click', () => setMonth(addMonths(currentMonth, -1)));
