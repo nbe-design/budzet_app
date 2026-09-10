@@ -62,6 +62,22 @@ projekcija; maknuti redovi "Trenutni (stvarni) ostatak" i "Predviđeno stanje pr
 plaće". (c) Kartica "Projekcija" (odluka #24): "Planirani ostatak na kraju mjeseca" +
 novi red "Odstupanje od plana" (realni − planirani ostatak, crveno/zeleno).
 
+**2026-09-10 (2):** (Q1) "Planirani ostatak na kraju mjeseca" (`closingPlanned`) sad
+koristi **stvarni** iznos gdje je unesen — plaća koja je sjela (`income.actual`),
+korigirani fiksni (`fixed.actual`), uneseni honorari, uplaćeni lonci (`potContribs.actual`)
+— a plan samo tamo gdje stvarni još nije poznat. Varijabilne kategorije ostaju na planu
+(referentni budžet). Ranije je uvijek koristio `planned` pa je npr. plaća 1888,08 € i
+dalje računala s 1900 €. Novi computeMonth ključ: `incomeExpected` / `fixedExpected` /
+`potContribExpected`. `incomePlanned` (čisti plan) ostaje za eventualnu buduću upotrebu.
+
+(Q2) Usklađivanje s Nikolinim Excelom (razlika ~28 €) — nije bug u izračunu, nego
+podaci: **Vrtić je u seedu kao dvije stavke (Vrtić 1 + Vrtić 2 = 80 €/mj), a u Excelu
+kao jedna (40 €/mj).** To je −40 € u appu; djelomično maskirano razlikom plaće
+(plan 1900 vs stvarnih 1888,08 = +11,92 €); neto −28,09 € (točno na cent). Rata banka 2
+55,56 vs 55,55 = 0,01 € (šum). Čeka se Nikolina potvrda je li vrtić 40 ili 80 €/mj.
+Ako je 40: obriši "Vrtić 2" u Postavkama i (uz Q1 + unos stvarne plaće) app se poklapa
+s Excelom na cent (325,01 vs 325,02).
+
 **Sljedeći korak:** sve iz v1 opsega (odjeljak 9) je gotovo. App radi na računalu i
 mobitelu, na javnoj adresi, sa Google Drive sinkronizacijom, uređivanjem postavki kroz UI
 i CSV izvozom. Preostaje samo (nije hitno): "Add to Home Screen" na mobitelu za pravi

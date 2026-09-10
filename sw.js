@@ -1,5 +1,5 @@
 /* Service worker — offline cache. Podigni CACHE verziju pri promjeni datoteka. */
-const CACHE = 'budzet-v6';
+const CACHE = 'budzet-v7';
 const ASSETS = [
   '.',
   'index.html',

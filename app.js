@@ -413,11 +413,20 @@ function computeMonth(state, month) {
   const closingBalance = M.openingBalance + incomeActual - fixedActual - varActual
     - potContribActual + adjust;
 
-  const closingPlanned = M.openingBalance + incomePlanned - fixedPlanned - varPlanned
-    - potContribPlanned + adjust;
+  // "Planirani ostatak" koristi STVARNI iznos gdje je poznat (plaća koja je sjela,
+  // plaćeni fiksni s korigiranim iznosom, uplaćeni lonci, uneseni honorari) — a plan
+  // tamo gdje još nije uneseno. Varijabilne kategorije ostaju na planu jer su referentni
+  // budžet. (Q1, 2026-09-10: planirani ostatak se prilagođava ručno unesenoj plaći
+  // umjesto defaultnih 1900; ranije je uvijek koristio i.planned.)
+  const incomeExpected = sum(M.income, i => i.actual ?? i.planned) + sum(M.honorari, h => h.toAccount);
+  const fixedExpected = sum(M.fixed, f => f.actual ?? f.planned);
+  const potContribExpected = sum(M.potContribs, pc => pc.actual ?? pc.planned);
+
+  const closingPlanned = M.openingBalance + incomeExpected - fixedExpected - varPlanned
+    - potContribExpected + adjust;
 
   return {
-    month, incomeActual, incomePlanned, fixedActual, fixedPlanned,
+    month, incomeActual, incomePlanned, incomeExpected, fixedActual, fixedPlanned,
     varActual, varPlanned, potContribActual, potContribPlanned, sinkingSpend, adjust,
     closingBalance, closingPlanned,
   };
@@ -561,7 +570,7 @@ function renderDashboard() {
   const delta = realEnd - roll.closingPlanned;
   wrap.append(el('div', { class: 'card' },
     el('h2', {}, 'Projekcija'),
-    row('Planirani ostatak na kraju mjeseca', eur(roll.closingPlanned), 'ako mjesec prođe po planu, s plaćom'),
+    row('Planirani ostatak na kraju mjeseca', eur(roll.closingPlanned), 'plan, uz stvarne iznose gdje su uneseni (plaća, honorar…)'),
     row('Odstupanje od plana', (delta > 0 ? '+' : '') + eur(delta),
       delta < 0 ? 'realni ostatak je manji — prekoračenje' : (delta > 0 ? 'realni ostatak je veći — ušteda / višak' : 'zasad točno po planu'),
       delta < 0 ? 'neg' : (delta > 0 ? 'pos' : 'muted')),
