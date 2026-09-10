@@ -76,7 +76,6 @@ function addMonths(s, n) {
 }
 function cmpMk(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
 function monthName(s) { const { y, m } = parseMk(s); return `${HR_MONTHS[m - 1]} ${y}`; }
-function daysInMonth(s) { const { y, m } = parseMk(s); return new Date(y, m, 0).getDate(); }
 function todayMk() { const d = new Date(); return mk(d.getFullYear(), d.getMonth() + 1); }
 
 function activeInMonth(item, month) {
@@ -369,25 +368,26 @@ function computeMonth(state, month) {
   const varActual = sum(M.variable, c => sum(c.entries, e => e.amount));
   const varPlanned = sum(M.variable, c => c.plan);
 
-  // doprinosi u savings lonce stvarno napuštaju račun
-  const savingsIds = new Set(state.pots.filter(p => p.type === 'savings').map(p => p.id));
-  const savingsContribActual = sum(M.potContribs, pc => pc.paid && savingsIds.has(pc.potId) ? (pc.actual ?? pc.planned) : 0);
+  // Uplate u lonce stvarno napuštaju tekući račun — novac ide na odvojene štedne
+  // račune (vidi SPEC.md odluku #22). Isplate IZ lonca (potSpends) idu sa štednog,
+  // ne s tekućeg, pa NE ulaze u closingBalance.
+  const potContribActual = sum(M.potContribs, pc => pc.paid ? (pc.actual ?? pc.planned) : 0);
+  const potContribPlanned = sum(M.potContribs, pc => pc.planned);
 
-  // sinking računi plaćeni ovaj mjesec (novac stvarno odlazi)
+  // sinking računi plaćeni ovaj mjesec — plaćaju se iz lonca (info za Analizu i Lonce)
   const sinkingSpend = sum(M.potSpends, s => s.done ? s.amount : 0);
 
   const adjust = sum(M.adjustments, a => a.amount);
 
   const closingBalance = M.openingBalance + incomeActual - fixedActual - varActual
-    - savingsContribActual - sinkingSpend + adjust;
+    - potContribActual + adjust;
 
   const closingPlanned = M.openingBalance + incomePlanned - fixedPlanned - varPlanned
-    - sum(M.potContribs, pc => savingsIds.has(pc.potId) ? pc.planned : 0)
-    - sum(M.potSpends, s => s.amount) + adjust;
+    - potContribPlanned + adjust;
 
   return {
     month, incomeActual, incomePlanned, fixedActual, fixedPlanned,
-    varActual, varPlanned, savingsContribActual, sinkingSpend, adjust,
+    varActual, varPlanned, potContribActual, potContribPlanned, sinkingSpend, adjust,
     closingBalance, closingPlanned,
   };
 }
@@ -416,12 +416,14 @@ function accountBalance(state) {
   return roll ? roll.closingBalance : state.settings.startingBalance;
 }
 
-/* Slobodno za potrošiti = stanje računa − Σ svih sinking lonaca. */
+/* Slobodno za potrošiti = stanje tekućeg − ovomjesečne uplate u lonce koje još nisu
+   prebačene na štednju (taj novac je namijenjen, ne diraj ga). Već prebačene uplate
+   su izašle iz stanja tekućeg, pa se ne oduzimaju ponovno. */
 function freeToSpend(state) {
   const last = latestOpenMonth(state);
-  let reserved = 0;
-  for (const p of state.pots) if (p.type === 'sinking') reserved += potBalance(state, p.id, last);
-  return accountBalance(state) - reserved;
+  const M = state.months[last];
+  const pending = M ? sum(M.potContribs, pc => pc.paid ? 0 : (pc.actual ?? pc.planned)) : 0;
+  return accountBalance(state) - pending;
 }
 
 /* Projekcija: hoće li sinking lonac biti pun do nextDue. */
@@ -448,10 +450,13 @@ function nextPayday(state) {
   return { placa, month, day: placa.day };
 }
 
-/* Predviđeno stanje računa točno prije nego sljedeća plaća sjedne — trenutno stanje
-   umanjeno za sve još neplaćene obveze koje dospijevaju do tada. Varijabilno se
-   projicira po GOREM od (plan/dan, stvarni tempo/dan) — ako se već trošI više od
-   plana, projekcija to uzima u obzir umjesto da se drži optimističkog plana. */
+/* Predviđeno stanje tekućeg računa neposredno prije nego sljedeća plaća sjedne.
+   Namjerno jednostavno (vidi SPEC.md odluku #20): trenutno stanje tekućeg umanjeno
+   za sve još NEPLAĆENE obveze koje dospijevaju do tada (fiksni troškovi + uplate u
+   lonce). Plaća se NE dodaje (to je referenca "koliko mi ostane od prošlog mjeseca").
+   Varijabilna diskrecijska potrošnja se NE projicira. Isplate iz lonaca (potSpends)
+   idu sa štednog računa, ne diraju tekući. Sam iznos plaće → korisnik ga unese
+   ručno kad sjedne, i tada štiklira stavke koje su se naplatile s njom. */
 function projectedBeforePayday(state) {
   const cur = latestOpenMonth(state);
   const M = state.months[cur];
@@ -482,21 +487,8 @@ function projectedBeforePayday(state) {
     const im = M.income.find(x => x.refId === r.id);
     if (im && !im.received) projected += (im.actual ?? im.planned);
   }
-  // neplaćeni doprinosi u lonce i godišnji računi ovaj mjesec
+  // neplaćene uplate u lonce ovaj mjesec (novac koji tek treba otići na štednju)
   for (const pc of M.potContribs) if (!pc.paid) projected -= (pc.actual ?? pc.planned);
-  for (const s of M.potSpends) if (!s.done) projected -= s.amount;
-
-  // varijabilno: preostali dani do isplate, po gorem od plan-tempa i stvarnog tempa
-  const dim = daysInMonth(cur);
-  const todayDate = new Date().getDate();
-  const spentVar = sum(M.variable, c => sum(c.entries, e => e.amount));
-  const planVar = sum(M.variable, c => c.plan);
-  const planRate = planVar / dim;
-  const actualRate = todayDate > 0 ? spentVar / todayDate : planRate;
-  const rate = Math.max(planRate, actualRate);
-  const windowEndDay = (paydayMonth === cur) ? Math.min(paydayDay, dim) : dim;
-  const remainingDays = Math.max(0, windowEndDay - todayDate);
-  projected -= Math.round(rate * remainingDays);
 
   return { amount: projected, paydayMonth, paydayDay };
 }
@@ -566,7 +558,7 @@ function renderDashboard() {
   const freeCard = el('div', { class: 'card' },
     el('h2', {}, 'Slobodno za potrošiti'),
     el('div', { class: 'big-number ' + (free < 0 ? 'neg' : '') }, eur(free)),
-    el('p', { class: 'notice' }, `Stanje računa ${eur(accountBalance(state))} − rezerve u loncima`),
+    el('p', { class: 'notice' }, `Stanje tekućeg ${eur(accountBalance(state))} − uplate u lonce koje slijede`),
   );
   wrap.append(freeCard);
 
@@ -581,14 +573,13 @@ function renderDashboard() {
     el('p', { class: 'notice' }, `Potrošeno ${eur(zivotSpent)} od plana ${eur(zivotPlan)}`),
   ));
 
-  // projekcija kraja mjeseca
+  // projekcija
   wrap.append(el('div', { class: 'card' },
-    el('h2', {}, 'Projekcija kraja mjeseca'),
-    row('Planirani ostatak', eur(roll.closingPlanned)),
-    row('Trenutni (stvarni) ostatak', eur(roll.closingBalance)),
+    el('h2', {}, 'Projekcija'),
+    row('Planirani ostatak na kraju mjeseca', eur(roll.closingPlanned), 'ako mjesec prođe po planu, s plaćom'),
     (() => { const pb = projectedBeforePayday(state);
       return row(`Predviđeno stanje prije iduće plaće (${pb.paydayDay}. ${monthName(pb.paydayMonth)})`,
-        eur(pb.amount), 'uzima u obzir trenutni tempo trošenja, ne samo plan');
+        eur(pb.amount), 'neplaćene obveze do tada oduzete, bez plaće');
     })(),
   ));
 
@@ -638,8 +629,8 @@ function renderMonth() {
     row('Prihodi (stvarno)', eur(roll.incomeActual)),
     row('Fiksni (stvarno)', '−' + eur(roll.fixedActual)),
     row('Varijabilno (stvarno)', '−' + eur(roll.varActual)),
-    row('Sinking računi (godišnji)', '−' + eur(roll.sinkingSpend)),
-    row('Ostatak', eur(roll.closingBalance)),
+    row('Uplate u lonce (na štednju)', '−' + eur(roll.potContribActual)),
+    row('Ostatak na tekućem', eur(roll.closingBalance)),
     M.closed ? el('span', { class: 'pill warn' }, 'zaključen') : el('button', { class: 'ghost', onclick: () => { M.closed = true; persist(); render(); } }, 'Označi zaključenim'),
   ));
 

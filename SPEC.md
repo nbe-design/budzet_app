@@ -2,7 +2,7 @@
 
 > Master dokument. Sadrži sve odluke i podatke dogovorene u razgovoru s Claudeom.
 > Cilj: moći nastaviti gradnju na bilo kojem računalu bez ponavljanja.
-> Zadnje ažurirano: 2026-09-09
+> Zadnje ažurirano: 2026-09-10
 
 ---
 
@@ -53,6 +53,11 @@ istovremeno na dva uređaja.
 | Google Drive sync | ✅ gotovo, potvrđeno uživo (odjeljak 10) |
 | PWA ikone | ✅ gotovo (`icons/icon-192.png`, `icon-512.png`) |
 | Hosting (GitHub Pages) | ✅ gotovo — https://nbe-design.github.io/budzet_app/ — potvrđeno na mobitelu |
+
+**2026-09-10:** model lonaca promijenjen (odluka #22) — uplate u lonce sad stvarno
+napuštaju tekući račun (Nikola ih drži na odvojenim štednim računima), pa svi dashboard
+brojevi prikazuju čisto stanje tekućeg. Dashboard "Projekcija" kartica: maknut redundantan
+"Trenutni (stvarni) ostatak" red, pred-plaća projekcija pojednostavljena.
 
 **Sljedeći korak:** sve iz v1 opsega (odjeljak 9) je gotovo. App radi na računalu i
 mobitelu, na javnoj adresi, sa Google Drive sinkronizacijom, uređivanjem postavki kroz UI
@@ -134,11 +139,12 @@ budzet/
     // type "sinking": nakuplja se, pa račun povuče iz lonca. nextDue = "YYYY-MM" sljedećeg
     //   dospijeća (ne samo mjesec 1-12 — puna godina, jer prvi ciklus može preskočiti godinu).
     //   Nakon dospijeća app automatski postavi nextDue += 12 mj. i monthly = targetAmount / 12.
-    // type "savings": samo raste (ulaganja) — nema nextDue, nema povlačenja
+    // type "savings": samo raste — nema nextDue, nema povlačenja
     { "id": "...", "name": "Servis auto", "type": "sinking",
       "monthly": 4444, "targetAmount": 40000, "nextDue": "2027-05", "startMonth": "2026-09" }
-    // type "savings" postoji u kodu ali se trenutno ne koristi — Ulaganja (T212) je
-    // premješteno u variableCategories (odluka #17), ne vodi se više kao lonac.
+    // od odluke #22 izračun ne razlikuje "sinking" i "savings" — svaka plaćena uplata u
+    // lonac jednako izlazi iz tekućeg. "savings" se trenutno ne koristi (Ulaganja T212 je
+    // premješteno u variableCategories, odluka #17).
   ],
 
   "months": {
@@ -188,22 +194,23 @@ budzet/
 
 ## 5. Pravila izračuna (VAŽNO — suptilno)
 
-Dogovoreni model lonaca (odluka #2):
-**"Sinking fund umanjuje prikazani ostatak odmah; rezerva se vidi kao lonac; veliki
-račun se vuče iz lonca."**
+Dogovoreni model lonaca (odluka #22, ranije #2/#3):
+**"Mjesečna uplata u lonac odmah napušta tekući račun (fizički ide na odvojeni štedni
+račun); saldo lonca vidi se u kartici Lonci; veliki račun se plaća iz lonca i ne dira
+tekući."**
 
-### Stanje računa (pravi novac u banci)
+### Stanje računa (pravi novac na TEKUĆEM računu)
 
 `accountBalance` se mijenja s:
 - `+` primljeni prihodi (income.actual gdje received) + honorari.toAccount
 - `−` plaćeni fiksni troškovi (fixed.actual gdje paid)
 - `−` potrošeno u varijabilnim kategorijama (Σ entries)
-- `−` **uplate u lonac tipa `savings`** (ulaganja stvarno odlazi brokeru)
-- `−` **plaćeni sinking računi** (potSpends — novac stvarno odlazi)
+- `−` **plaćene uplate u lonce** (potContribs gdje paid — novac ide na odvojene štedne
+  račune, vidi odluku #22)
 - `±` adjustments
 
-`accountBalance` se **NE mijenja** mjesečnim doprinosom u sinking lonac
-(taj novac fizički ostaje na računu, samo je namjenski rezerviran).
+`accountBalance` se **NE mijenja** isplatom iz lonca (`potSpends`) — taj novac odlazi
+sa štednog računa lonca, ne s tekućeg.
 
 ### Varijabilne kategorije — plan je referenca, ne "omotnica"
 
@@ -224,18 +231,19 @@ sjela) koji se razlikuje od planiranog — čekiranje "primljeno/plaćeno" ne mo
 koristiti planirani broj. `actual` polje se koristi u izračunima kad postoji
 (`actual ?? planned`).
 
-### Stanje lonca
+### Stanje lonca (= saldo odvojenog štednog računa tog lonca)
 
 - `sinking` lonac: `Σ potContribs.actual (paid) − Σ potSpends.amount`
-- `savings` lonac (ulaganja): `Σ potContribs.actual (paid)` — raste zauvijek, nikad se ne povlači
+- prati se u kartici Lonci (`potBalance()`), neovisno o tekućem računu
 
 ### Slobodno za potrošiti (glavni broj na dashboardu)
 
 ```
-slobodno = accountBalance − Σ (stanje svih sinking lonaca)
+slobodno = accountBalance − Σ (ovomjesečne uplate u lonce koje još NISU označene plaćenima)
 ```
 
-(ulaganja se ne oduzima jer je novac već otišao)
+(već prebačene uplate su izašle iz `accountBalance`, pa se ne oduzimaju ponovno —
+odluka #22)
 
 ### Mjesečni "ostatak" (broj iz Nikoline tablice) = zatvarajuće stanje
 
@@ -244,9 +252,11 @@ closingBalance(mj) = openingBalance
                    + Σ income.actual + Σ honorari.toAccount
                    − Σ fixed.actual
                    − Σ variable.entries
-                   − Σ potContribs.actual za savings lonce
-                   − Σ potSpends (sinking računi plaćeni ovaj mjesec)
+                   − Σ potContribs.actual (sve plaćene uplate u lonce — odluka #22)
+                   ± Σ adjustments
 ```
+
+(`potSpends` se ovdje NE oduzima — isplata ide sa štednog računa lonca, ne s tekućeg)
 
 Kad se mjesec zatvori, `closingBalance` postaje `openingBalance` idućeg mjeseca.
 
@@ -255,8 +265,18 @@ Kad se mjesec zatvori, `closingBalance` postaje `openingBalance` idućeg mjeseca
 - **Preostalo za "Život"** = `var-zivot` kategorija: plan − stvarno potrošeno (istaknuto veliko, odluka #21 —
   Nikolina ključna dnevna kontrolna stavka, zamijenilo raniji "Dnevni budžet" koji je bio
   previše apstraktan i nesvjesno uključivao Porez na najam/Ulaganja u prosjek po danu).
-- **Projekcija kraja mjeseca** = slobodno − (svi preostali planirani odljevi ovog mjeseca: neplaćeni fiksni + preostali plan varijabilnih + neplaćeni doprinosi lonaca + sinking računi koji dospijevaju ovaj mjesec)
-- **Predviđeno stanje prije iduće plaće** (odluka #20) = `accountBalance` − (sve još neplaćene obveze koje dospijevaju do idućeg dana isplate plaće: fiksni troškovi, doprinosi lonaca, godišnji računi, + eventualno drugi neprimljeni prihodi tog razdoblja) − (varijabilno za preostale dane do isplate, po **gorem** od plan-tempa/dan i stvarnog tempa/dan do sada). Ako se već troši više od plana, projekcija to odmah odražava umjesto da se drži optimističnog plana. Isplata = prvi neprimljeni `income.recurring` unos s id `inc-placa` — ako je ovaj mjesec već primljen, gleda se iduci mjesec. Matematički neovisno o TOME kad se nešto plati (samo o UKUPNIM poznatim obvezama/prihodima do tog datuma) — plaćanje danas vs. sutra ne mijenja projekciju, samo prebacuje iznos iz "još treba" u "stvarno stanje".
+- **Planirani ostatak na kraju mjeseca** = `closingPlanned`: openingBalance + Σ planiranih
+  prihoda (uklj. plaću) − Σ planiranih fiksnih − Σ planiranog varijabilnog plana −
+  Σ planiranih uplata u lonce. Gdje završavaš mjesec ako sve prođe po planu i plaća sjedne.
+- **Predviđeno stanje prije iduće plaće** (odluka #20; pojednostavljeno 2026-09-10) =
+  `accountBalance` − (sve još **neplaćene** obveze koje dospijevaju prije idućeg dana
+  isplate plaće: fiksni troškovi + još neprebačene uplate u lonce) + (eventualni
+  neprimljeni ne-plaća prihodi tog razdoblja). **Plaća se NE uključuje** — broj je
+  referenca "koliko mi ostaje od prošlog mjeseca dok ne sjedne nova plaća". Diskrecijska
+  varijabilna potrošnja se **ne projicira** (prati se kroz "Preostalo za Život").
+  Isplate iz lonaca (`potSpends`) idu sa štednog, ne ulaze. Isplata = prvi neprimljeni
+  `income.recurring` s id `inc-placa`; ako je ovaj mjesec već primljen, gleda se idući.
+  Kad plaća sjedne, korisnik je unese ručno i tada štiklira stavke naplaćene s njom.
 - **Upozorenje na manjak lonca**: za svaki sinking lonac, projicirano stanje na `nextDue` = trenutno stanje + (mjeseci do nextDue) × monthly. Ako < targetAmount → crveno, prikaži manjak.
 
 ### Rata lonca — prvi ciklus vs. ustaljeni ciklus (odluka #15)
@@ -401,16 +421,14 @@ standardnu ratu; kad svi prođu prvi ciklus (do studenog 2027): ~163,34 €/mj.
 | Varijabilni plan (uklj. Ulaganja 225) | −633,80 € |
 | **Ostatak** | **~148,94 € + honorari** |
 
-*Napomena: "Ostatak" ovdje je ilustrativan (koliko je novca stvarno "neraspoređeno" tog
-mjeseca) — ne treba ga brkati s formalnim `closingBalance` iz odjeljka 5, koji doprinose
-u sinking lonce ne oduzima (taj novac fizički ostaje na računu, samo je rezerviran).
+*Napomena: "Ostatak" ovdje je ono što ostane na tekućem nakon što sve prođe po planu —
+podudara se s `closingPlanned` iz odjeljka 5 (od odluke #22 `closingBalance`/`closingPlanned`
+oduzimaju i uplate u lonce jer novac stvarno ode na štednju).
 Ukupni zbroj se nije promijenio premještanjem Ulaganja/Hrane između kategorija (isti
 novac, samo drugi red u tablici) — pao je jedino za +50 € razlike Hrane (300→350).*
 
 Studeni 2026 je iznimka: uz redovan mjesec dolazi i jednokratni trošak Kasko (pola)
-250 € → ostatak (ilustrativno) pada na **~−101,06 € prije honorara**. Stvarno stanje
-računa **ne ide u minus** — samo je gotovo sav novac tog mjeseca već rezerviran/
-namijenjen (fiksni + lonci + ulaganja), umjesto fizički potrošen. Ventil: taj mjesec
+250 € → ostatak na tekućem (ilustrativno) pada na **~−101,06 € prije honorara**. Ventil: taj mjesec
 uplatiti manje u ulaganja (varijabilna kategorija, može se preskočiti/smanjiti bez
 posljedica), ili pokriti honorarom.
 
@@ -448,7 +466,7 @@ prazne — ne stvara se rupa u računu.
 |---|---|---|
 | 1 | Podsjetnici | Bez push obavijesti. Dashboard pri otvaranju pokaže dospijeća + "plaća nije unesena". |
 | 2 | Budžetski mjesec | = kalendarski. Prošli mjeseci uredivi ali označeni "zaključen". Novi mjesec se otvara **ručno**. |
-| 3 | Sinking fund | Umanjuje prikazani ostatak odmah; rezerva vidljiva kao "lonac"; veliki račun se vuče iz lonca. |
+| 3 | Sinking fund | Mjesečna uplata odmah napušta tekući (ide na odvojeni štedni račun — odluka #22); rezerva vidljiva kao "lonac" u kartici Lonci; veliki račun se plaća iz lonca (ne dira tekući). |
 | 4 | Plan vs. ostvareno | Po kategoriji po mjesecu. Plan se kopira iz prošlog mjeseca uz prijedlog po prosjeku. |
 | 5 | Fiksni kad se promijene | App pita: "samo ovaj mjesec" ili "od sad nadalje". |
 | 6 | Kategorije | Fiksna lista u postavkama, dopunjiva. Plosnata + neobavezni tag (ne pune potkategorije). |
@@ -465,8 +483,9 @@ prazne — ne stvara se rupa u računu.
 | 17 | Ulaganja (T212) lokacija | Premješteno iz Lonaca (type "savings") u varijabilne kategorije, plan 225 €/mj (2026-09-09). Honorar-investicija se knjiži kao unos u tu kategoriju (ne kao potContrib). Ukupan uloženi iznos kroz vrijeme prikazan u Analizi. Razlog: iznos varira po mjesecu i konceptualno je bliže "varijabilnom" unosu nego fiksnoj rezervaciji. |
 | 18 | Analiza — koje kategorije | "Prosjek po kategoriji" u Analizi prikazuje samo kategorije s `analyze: true` (Život, Gorivo) — Porez na najam (pass-through) i Ulaganja (investicija, ne trošenje) nisu korisne za tu usporedbu, pa su izostavljene (2026-09-09). |
 | 19 | Stvarni vs. planirani iznos | Prihodi i uplate u lonce imaju uređivo polje za stvarni iznos (ne samo checkbox), jer se npr. plaća rijetko poklapa točno s planom (2026-09-09). |
-| 20 | Predviđeno stanje prije plaće | Dodano na Dashboard (2026-09-09): projekcija stanja računa tik prije idućeg primitka plaće, ne kraja kalendarskog mjeseca. Varijabilno se projicira po gorem od plan-tempa i stvarnog tempa trošenja — overspend se odmah odražava u projekciji. |
+| 20 | Predviđeno stanje prije plaće | Dashboard (2026-09-09; pojednostavljeno 2026-09-10 — odluka #22): stanje **tekućeg** tik prije idućeg primitka plaće = `accountBalance` − sve još neplaćene obveze do tada (fiksni + neprebačene uplate u lonce) + neprimljeni ne-plaća prihodi. Plaća se ne uključuje; varijabilna diskrecijska potrošnja se ne projicira. |
 | 21 | Dnevni budžet → Preostalo za Život | Zamijenjeno (2026-09-09): umjesto agregatnog "dnevnog budžeta" (koji je nesvjesno uključivao Porez na najam i Ulaganja), Dashboard sad istaknuto prikazuje samo preostalo za kategoriju "Život" — to je stavka koju Nikola stvarno prati iz dana u dan. |
+| 22 | Lonci = odvojeni štedni računi | (2026-09-10) Nikola fizički drži novac za lonce na zasebnim štednim računima, ne na tekućem. Zato: plaćena uplata u lonac (`potContrib.paid`) odmah **izlazi iz `accountBalance`** u cijeloj aplikaciji (prije: "ostaje na računu, samo rezervirano"). `closingBalance`, `closingPlanned`, "Slobodno za potrošiti" i pred-plaća projekcija svi računaju čisto stanje tekućeg. Stanje lonaca prati se odvojeno u kartici Lonci (`potBalance`). Isplata iz lonca (`potSpend`) više ne dira tekući. Tip `savings` maknut iz izračuna — sve uplate u lonce tretiraju se jednako. Maknut redundantan red "Trenutni (stvarni) ostatak" s dashboarda (stanje tekućeg već piše u kartici "Slobodno za potrošiti"). Pred-plaća projekcija pojednostavljena: bez projekcije varijabilne potrošnje, bez varijante "najniža točka". |
 
 ---
 
