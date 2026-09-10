@@ -428,6 +428,23 @@ function potForecast(state, pot) {
   return { bal, projected, shortfall, monthsLeft, dueLabel: monthName(pot.nextDue) };
 }
 
+/* Realno predviđeno stanje na kraju mjeseca: kreće od stanja po dosad unesenom
+   (closingBalance) i oduzima što po planu još slijedi do kraja mjeseca. Za varijabilne
+   kategorije pretpostavlja da svaka završi na svom planu; ako je već prekoračena,
+   prekoračenje je već u stanju računa i ne "vraća se" (`max(0, plan − potrošeno)`).
+   Razlika ovoga i `closingPlanned` = odstupanje od plana (prekoračenja varijabilnih +
+   prihodi/troškovi/uplate koji su ispali drukčije od planiranih). */
+function projectedRealEndOfMonth(state, month) {
+  const M = state.months[month];
+  if (!M) return 0;
+  let bal = computeMonth(state, month).closingBalance;
+  for (const i of M.income) if (!i.received) bal += (i.actual ?? i.planned);
+  for (const f of M.fixed) if (!f.paid) bal -= (f.actual ?? f.planned);
+  for (const pc of M.potContribs) if (!pc.paid) bal -= (pc.actual ?? pc.planned);
+  for (const c of M.variable) bal -= Math.max(0, c.plan - sum(c.entries, e => e.amount));
+  return bal;
+}
+
 /* ------------------------------------------------------------------ *
  * Stanje aplikacije / render
  * ------------------------------------------------------------------ */
@@ -508,9 +525,14 @@ function renderDashboard() {
   ));
 
   // projekcija
+  const realEnd = projectedRealEndOfMonth(state, currentMonth);
+  const delta = realEnd - roll.closingPlanned;
   wrap.append(el('div', { class: 'card' },
     el('h2', {}, 'Projekcija'),
     row('Planirani ostatak na kraju mjeseca', eur(roll.closingPlanned), 'ako mjesec prođe po planu, s plaćom'),
+    row('Odstupanje od plana', (delta > 0 ? '+' : '') + eur(delta),
+      delta < 0 ? 'realni ostatak je manji — prekoračenje' : (delta > 0 ? 'realni ostatak je veći — ušteda / višak' : 'zasad točno po planu'),
+      delta < 0 ? 'neg' : (delta > 0 ? 'pos' : 'muted')),
   ));
 
   // upozorenja
@@ -540,10 +562,10 @@ function renderDashboard() {
   return wrap;
 }
 
-function row(label, amount, sub) {
+function row(label, amount, sub, amountClass) {
   return el('div', { class: 'row' },
     el('span', { class: 'label' }, label, sub ? el('span', { class: 'sub' }, ' · ' + sub) : null),
-    el('span', { class: 'amount' }, amount),
+    el('span', { class: 'amount' + (amountClass ? ' ' + amountClass : '') }, amount),
   );
 }
 

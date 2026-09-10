@@ -59,7 +59,8 @@ napuštaju tekući račun (Nikola ih drži na odvojenim štednim računima), pa 
 brojevi prikazuju čisto stanje tekućeg. (b) Dashboard pojednostavljen (odluka #23):
 glavna kartica je sad **"Stanje računa"** = čisti trenutni `accountBalance`, bez
 projekcija; maknuti redovi "Trenutni (stvarni) ostatak" i "Predviđeno stanje prije iduće
-plaće"; kartica "Projekcija" ima samo "Planirani ostatak na kraju mjeseca".
+plaće". (c) Kartica "Projekcija" (odluka #24): "Planirani ostatak na kraju mjeseca" +
+novi red "Odstupanje od plana" (realni − planirani ostatak, crveno/zeleno).
 
 **Sljedeći korak:** sve iz v1 opsega (odjeljak 9) je gotovo. App radi na računalu i
 mobitelu, na javnoj adresi, sa Google Drive sinkronizacijom, uređivanjem postavki kroz UI
@@ -268,10 +269,18 @@ Kad se mjesec zatvori, `closingBalance` postaje `openingBalance` idućeg mjeseca
 - **Preostalo za "Život"** = `var-zivot` kategorija: plan − stvarno potrošeno (istaknuto veliko, odluka #21 —
   Nikolina ključna dnevna kontrolna stavka, zamijenilo raniji "Dnevni budžet" koji je bio
   previše apstraktan i nesvjesno uključivao Porez na najam/Ulaganja u prosjek po danu).
-- **Planirani ostatak na kraju mjeseca** (jedini red u kartici "Projekcija") = `closingPlanned`:
+- **Planirani ostatak na kraju mjeseca** (kartica "Projekcija", 1. red) = `closingPlanned`:
   openingBalance + Σ planiranih prihoda (uklj. plaću) − Σ planiranih fiksnih −
   Σ planiranog varijabilnog plana − Σ planiranih uplata u lonce. Gdje završavaš mjesec
-  ako sve prođe po planu i plaća sjedne.
+  ako sve prođe po planu i plaća sjedne. Statičan — ne mijenja se štikliranjem.
+- **Odstupanje od plana** (kartica "Projekcija", 2. red; odluka #24) =
+  `projectedRealEndOfMonth − closingPlanned`. `projectedRealEndOfMonth` kreće od stanja po
+  dosad unesenom (`closingBalance`) pa oduzme što po planu još slijedi do kraja mjeseca:
+  neprimljene prihode, neplaćene fiksne, neplaćene uplate u lonce, i za svaku varijabilnu
+  kategoriju `max(0, plan − potrošeno)` (prekoračena kategorija ne "vraća" ništa — minus je
+  već u stanju računa). Negativno → crveno ("prekoračenje"), pozitivno → zeleno
+  ("ušteda / višak"), nula → sivo. Pokazuje prekoračenja varijabilnih + prihode/troškove/
+  uplate koji su ispali drukčije od planiranih.
 - **Upozorenje na manjak lonca**: za svaki sinking lonac, projicirano stanje na `nextDue` = trenutno stanje + (mjeseci do nextDue) × monthly. Ako < targetAmount → crveno, prikaži manjak.
 
 > "Predviđeno stanje prije iduće plaće" (bivša odluka #20) **maknuto 2026-09-10** — vidi
@@ -486,6 +495,7 @@ prazne — ne stvara se rupa u računu.
 | 21 | Dnevni budžet → Preostalo za Život | Zamijenjeno (2026-09-09): umjesto agregatnog "dnevnog budžeta" (koji je nesvjesno uključivao Porez na najam i Ulaganja), Dashboard sad istaknuto prikazuje samo preostalo za kategoriju "Život" — to je stavka koju Nikola stvarno prati iz dana u dan. |
 | 22 | Lonci = odvojeni štedni računi | (2026-09-10) Nikola fizički drži novac za lonce na zasebnim štednim računima, ne na tekućem. Zato: plaćena uplata u lonac (`potContrib.paid`) odmah **izlazi iz `accountBalance`** u cijeloj aplikaciji (prije: "ostaje na računu, samo rezervirano"). `closingBalance` i `closingPlanned` oduzimaju plaćene/planirane uplate u lonce. Stanje lonaca prati se odvojeno u kartici Lonci (`potBalance`). Isplata iz lonca (`potSpend`) više ne dira tekući. Tip `savings` maknut iz izračuna — sve uplate u lonce tretiraju se jednako. Maknut redundantan red "Trenutni (stvarni) ostatak" s dashboarda. |
 | 23 | Dashboard = samo stvarno stanje | (2026-09-10) Nikola želi dashboard koji pokazuje **trenutno stvarno stanje tekućeg**, bez projekcija budućih plaćanja — potrošnju prati sam štikliranjem. Zato: glavna kartica preimenovana "Slobodno za potrošiti" → **"Stanje računa"** i prikazuje čisti `accountBalance` (bez oduzimanja nadolazećih uplata u lonce). "Predviđeno stanje prije iduće plaće" red **maknut**. Kartica "Projekcija" ostavljena samo s "Planirani ostatak na kraju mjeseca". Uklonjene funkcije `freeToSpend`, `projectedBeforePayday`, `nextPayday`, `absDay`, `daysInMonth`. |
+| 24 | Odstupanje od plana | (2026-09-10) Ispod "Planirani ostatak na kraju mjeseca" dodan red **"Odstupanje od plana"** = realni predviđeni ostatak − planirani. Nikola često prekorači potrošnju (posebno kategorija "Život") pa želi na prvi pogled vidjeti koliko realni ostatak zaostaje za planom. Crveno ako je manji (prekoračenje), zeleno ako je veći (ušteda / neočekivani prihod), sivo ako je točno na planu. Funkcija `projectedRealEndOfMonth()`. |
 
 ---
 
@@ -501,9 +511,9 @@ prazne — ne stvara se rupa u računu.
   Inline unos pojedinačnih troškova (Enter-za-dodati).
 - **Plaćeno / nije plaćeno** kvačica po stavci.
 - **Unos honorara** → pita split u ulaganja, ostatak na račun.
-- **Dashboard** (#23): stanje računa (čisti `accountBalance`) • preostalo za "Život" (#21) •
-  planirani ostatak na kraju mjeseca • što dospijeva ovaj tjedan • je li plaća unesena •
-  stanja lonaca s upozorenjima na manjak.
+- **Dashboard** (#23, #24): stanje računa (čisti `accountBalance`) • preostalo za "Život" (#21) •
+  planirani ostatak na kraju mjeseca + odstupanje od plana (crveno/zeleno) • što dospijeva
+  ovaj tjedan • je li plaća unesena • stanja lonaca s upozorenjima na manjak.
 - **Analiza**: potrošnja po mjesecima (stupčasti graf) • prosjek po kategoriji •
   top 5 stavki mjeseca • plan vs. ostvareno kumulativno kroz godinu.
 - **Ručno otvaranje novog mjeseca**; prošli uredivi, označeni "zaključen".
