@@ -88,6 +88,25 @@ body {
 }
 .card h2 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 
+.card > summary {
+  cursor: pointer;
+  list-style: none;
+  margin: 0 0 10px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.card > summary::-webkit-details-marker { display: none; }
+.card > summary::after { content: '▸'; font-size: 11px; }
+.card[open] > summary { margin-bottom: 10px; }
+.card[open] > summary::after { content: '▾'; }
+.card:not([open]) > summary { margin-bottom: 0; }
+summary .pill { margin-left: 8px; text-transform: none; letter-spacing: normal; }
+
 .big-number { font-size: 30px; font-weight: 700; }
 .row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 6px 0; }
 .row + .row { border-top: 1px solid var(--line); }

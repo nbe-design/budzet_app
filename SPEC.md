@@ -78,6 +78,31 @@ kao jedna (40 €/mj).** To je −40 € u appu; djelomično maskirano razlikom 
 Ako je 40: obriši "Vrtić 2" u Postavkama i (uz Q1 + unos stvarne plaće) app se poklapa
 s Excelom na cent (325,01 vs 325,02).
 
+**2026-09-11:** UI dorade na Nikolin zahtjev. (a) Pojam "lonac/lonci" preimenovan u
+"štednja" posvuda u sučelju (tab, dashboard, Mjesec, Postavke, CSV izvoz) — **samo
+prikaz**, interni podatkovni ključevi (`pots`, `potContribs`, `potId`, `potBalance`...)
+namjerno nepromijenjeni da se ne pokvari već sinkronizirani JSON na Google Driveu.
+(b) Nova padajuća ("dropdown") sekcija: helper `collapsible(key, defaultOpen, title,
+badge, ...kids)` u app.js — `<details>/<summary>` koji pamti otvoreno/zatvoreno stanje
+po uređaju u `localStorage` (`budzet_ui_v1`, izvan glavnog data modela, ne ide na Drive).
+Primijenjeno na: Dashboard "Za pažnju" (zatvoreno prema zadanom, badge = broj upozorenja)
+s ugniježđenim "Neplaćeni fiksni" (isto zatvoreno prema zadanom) — da dashboard ne
+"vrišti" pri svakom otvaranju; te na Mjesec (Prihodi/Fiksni/Varijabilno/Uplate u štednju
+— otvoreno prema zadanom, aktivno se koriste) i Postavke (isto 4 sekcije + Štednja —
+zatvoreno prema zadanom, rijetko se uređuju). (c) Fiksni trošak u Mjesec ekranu sad ima
+"×" gumb za brisanje te stavke SAMO iz tog mjeseca (ne dira predložak u Postavkama);
+budući da se u izračun ubrajaju samo `paid` stavke, brisanje već plaćenog troška
+automatski "vrati" taj iznos u stanje računa — ovo rješava i Nikolin zahtjev da
+uklonjeni fiksni trošak ne ostane fantomski oduzet od plana/projekcije. (d) Postavke:
+gumbi "→ varijabilno" (na fiksnom trošku) i "→ fiksno" (na varijabilnoj kategoriji) za
+pretvorbu predloška iz jedne vrste u drugu bez ručnog JSON uređivanja — funkcije
+`convertFixedToVariable` / `convertVariableToFixed`; vrijedi od idućeg mjeseca nadalje,
+isto pravilo kao i svaka druga izmjena predloška. (e) Nikola je uklonio "Vrtić 2" iz
+fiksnih troškova (Postavke) — vrijedi od idućeg mjeseca; za rujan 2026 (već otvoren
+mjesec) treba ručno kliknuti "×" na "Vrtić 2" u Mjesec → Fiksni troškovi (vraća 40 €
+na stanje ako je stavka već bila označena plaćenom). Drugi vrtić se vjerojatno vraća
+od listopada/studenog 2026 — dodati naknadno kad se potvrdi.
+
 **Sljedeći korak:** sve iz v1 opsega (odjeljak 9) je gotovo. App radi na računalu i
 mobitelu, na javnoj adresi, sa Google Drive sinkronizacijom, uređivanjem postavki kroz UI
 i CSV izvozom. Preostaje samo (nije hitno): "Add to Home Screen" na mobitelu za pravi

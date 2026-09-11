@@ -124,7 +124,7 @@ const Store = {
       for (const h of M.honorari) rows.push([m, (h.date || '').slice(0, 10), 'Honorar', 'Honorar → račun', eurPlain(h.toAccount)]);
       for (const f of M.fixed) if (f.paid) rows.push([m, (f.date || '').slice(0, 10), 'Fiksni', f.name, '-' + eurPlain(f.actual ?? f.planned)]);
       for (const c of M.variable) for (const e of c.entries) rows.push([m, (e.date || '').slice(0, 10), 'Varijabilno', `${c.name}: ${e.note || ''}`, '-' + eurPlain(e.amount)]);
-      for (const pc of M.potContribs) if (pc.paid) rows.push([m, '', 'Uplata u lonac', pc.name, '-' + eurPlain(pc.actual ?? pc.planned)]);
+      for (const pc of M.potContribs) if (pc.paid) rows.push([m, '', 'Uplata u štednju', pc.name, '-' + eurPlain(pc.actual ?? pc.planned)]);
       for (const s of M.potSpends) if (s.done) rows.push([m, (s.date || '').slice(0, 10), 'Godišnji račun', s.name, '-' + eurPlain(s.amount)]);
       for (const a of M.adjustments) rows.push([m, '', 'Prilagodba', a.note || '', (a.amount >= 0 ? '' : '-') + eurPlain(Math.abs(a.amount))]);
     }
@@ -494,6 +494,12 @@ let currentMonth = latestOpenMonth(state);
 let currentView = 'dashboard';
 let settingsEdit = null; // { section: 'income'|'fixed'|'variable'|'pots', id: string|null } — id null = novi unos
 
+/* Otvoreno/zatvoreno stanje padajućih sekcija — lokalno po uređaju, ne ide na Drive. */
+const UI_KEY = 'budzet_ui_v1';
+let uiState = {};
+try { uiState = JSON.parse(localStorage.getItem(UI_KEY) || '{}'); } catch (e) { uiState = {}; }
+function saveUiState() { try { localStorage.setItem(UI_KEY, JSON.stringify(uiState)); } catch (e) {} }
+
 function persist() {
   Store.save(state);
   if (Drive.status === 'signed-in') Drive.push();
@@ -551,7 +557,7 @@ function renderDashboard() {
   wrap.append(el('div', { class: 'card' },
     el('h2', {}, 'Stanje računa'),
     el('div', { class: 'big-number ' + (bal < 0 ? 'neg' : '') }, eur(bal)),
-    el('p', { class: 'notice' }, 'Trenutno stanje tekućeg (lonci se drže na odvojenim štednim računima)'),
+    el('p', { class: 'notice' }, 'Trenutno stanje tekućeg (štednja se drži na odvojenim štednim računima)'),
   ));
 
   // preostalo za "Život" — istaknuto posebno, ovo je Nikolina ključna dnevna stavka
@@ -580,22 +586,17 @@ function renderDashboard() {
   const alerts = [];
   const placa = M.income.find(i => i.refId === 'inc-placa');
   if (placa && !placa.received) alerts.push('Plaća još nije unesena.');
-  for (const f of M.fixed) if (!f.paid) {
-    const dueDay = (state.fixedCosts.find(x => x.refId === f.refId) || {}).day;
-  }
   const dueThisWeek = M.fixed.filter(f => !f.paid).map(f => {
     const cfg = state.fixedCosts.find(x => x.id === f.refId);
     return { name: f.name, day: cfg ? cfg.day : 1, amount: f.planned };
   }).sort((a, b) => a.day - b.day);
   for (const p of state.pots) {
     const fc = potForecast(state, p);
-    if (fc.shortfall > 0) alerts.push(`Lonac "${p.name}": manjak ${eur(fc.shortfall)} do ${fc.dueLabel}.`);
+    if (fc.shortfall > 0) alerts.push(`Štednja "${p.name}": manjak ${eur(fc.shortfall)} do ${fc.dueLabel}.`);
   }
-  wrap.append(el('div', { class: 'card' },
-    el('h2', {}, 'Za pažnju'),
+  wrap.append(collapsible('dashAttention', false, 'Za pažnju', alerts.length,
     alerts.length ? el('div', {}, alerts.map(a => el('div', { class: 'row' }, el('span', { class: 'label' }, a)))) : el('p', { class: 'notice' }, 'Sve pod kontrolom.'),
-    dueThisWeek.length ? el('div', { style: 'margin-top:10px' },
-      el('h2', {}, 'Neplaćeni fiksni'),
+    dueThisWeek.length ? collapsible('dashUnpaidFixed', false, 'Neplaćeni fiksni', dueThisWeek.length,
       dueThisWeek.map(d => row(`${d.name} (${d.day}. u mj.)`, eur(d.amount)))) : null,
   ));
 
@@ -610,6 +611,18 @@ function row(label, amount, sub, amountClass) {
   );
 }
 
+/* Padajuća "card" sekcija. `key` pamti otvoreno/zatvoreno stanje (preživljava re-render).
+   `badge` (broj) prikazan uz naslov kad je > 0, npr. broj upozorenja/stavki. */
+function collapsible(key, defaultOpen, title, badge, ...kids) {
+  const det = document.createElement('details');
+  det.className = 'card';
+  det.open = uiState[key] ?? defaultOpen;
+  det.addEventListener('toggle', () => { uiState[key] = det.open; saveUiState(); });
+  det.append(el('summary', {}, title, badge ? el('span', { class: 'pill warn' }, String(badge)) : null));
+  for (const k of kids.flat(Infinity)) if (k != null) det.append(k);
+  return det;
+}
+
 /* ---------- Mjesec ---------- */
 function renderMonth() {
   const wrap = el('div');
@@ -622,33 +635,35 @@ function renderMonth() {
     row('Prihodi (stvarno)', eur(roll.incomeActual)),
     row('Fiksni (stvarno)', '−' + eur(roll.fixedActual)),
     row('Varijabilno (stvarno)', '−' + eur(roll.varActual)),
-    row('Uplate u lonce (na štednju)', '−' + eur(roll.potContribActual)),
+    row('Uplate u štednju', '−' + eur(roll.potContribActual)),
     row('Ostatak na tekućem', eur(roll.closingBalance)),
     M.closed ? el('span', { class: 'pill warn' }, 'zaključen') : el('button', { class: 'ghost', onclick: () => { M.closed = true; persist(); render(); } }, 'Označi zaključenim'),
   ));
 
   // Prihodi
-  const incCard = el('div', { class: 'card' }, el('h2', {}, 'Prihodi'));
+  const incKids = [];
   for (const i of M.income) {
-    incCard.append(checklineAmount(i.received, i.name, i.actual ?? i.planned,
+    incKids.push(checklineAmount(i.received, i.name, i.actual ?? i.planned,
       (v) => { i.received = v; if (v && i.date == null) i.date = new Date().toISOString(); persist(); render(); },
       (amt) => { i.actual = amt; persist(); render(); }));
   }
-  for (const h of M.honorari) incCard.append(row(`Honorar → račun`, eur(h.toAccount), `ulaganja ${eur(h.toInvest)}`));
-  wrap.append(incCard);
+  for (const h of M.honorari) incKids.push(row(`Honorar → račun`, eur(h.toAccount), `ulaganja ${eur(h.toInvest)}`));
+  wrap.append(collapsible('monthIncome', true, 'Prihodi', null, incKids));
 
   // Fiksni
-  const fxCard = el('div', { class: 'card' }, el('h2', {}, 'Fiksni troškovi'));
+  const fxKids = [];
   for (const f of M.fixed) {
-    fxCard.append(checkline(f.paid, f.name, '−' + eur(f.actual ?? f.planned), (v) => { f.paid = v; if (v && f.date == null) f.date = new Date().toISOString(); persist(); render(); }));
+    fxKids.push(checkline(f.paid, f.name, '−' + eur(f.actual ?? f.planned),
+      (v) => { f.paid = v; if (v && f.date == null) f.date = new Date().toISOString(); persist(); render(); },
+      () => { M.fixed = M.fixed.filter(x => x !== f); persist(); render(); }));
   }
-  wrap.append(fxCard);
+  wrap.append(collapsible('monthFixed', true, 'Fiksni troškovi', null, fxKids));
 
   // Varijabilno
-  const vCard = el('div', { class: 'card' }, el('h2', {}, 'Varijabilno'));
+  const vKids = [];
   for (const c of M.variable) {
     const spent = sum(c.entries, e => e.amount);
-    vCard.append(el('div', { class: 'row' },
+    vKids.push(el('div', { class: 'row' },
       el('span', { class: 'label' }, c.name, el('span', { class: 'sub' }, ` · ${eur(spent)} / ${eur(c.plan)}`)),
       el('span', { class: 'amount ' + (spent > c.plan ? 'neg' : 'muted') }, spent > c.plan ? '+' + eur(spent - c.plan) : eur(c.plan - spent) + ' ostalo'),
     ));
@@ -657,9 +672,9 @@ function renderMonth() {
     const add = () => { const v = parseEur(amt.value); if (!v) return; c.entries.push({ id: uid(), amount: v, note: note.value, date: new Date().toISOString() }); persist(); render(); };
     amt.addEventListener('keydown', e => { if (e.key === 'Enter') add(); });
     note.addEventListener('keydown', e => { if (e.key === 'Enter') add(); });
-    vCard.append(el('div', { class: 'inline-add' }, amt, note, el('button', { class: 'ghost', onclick: add }, '+')));
+    vKids.push(el('div', { class: 'inline-add' }, amt, note, el('button', { class: 'ghost', onclick: add }, '+')));
     if (c.entries.length) {
-      vCard.append(el('div', { style: 'margin-top:6px' }, c.entries.slice().reverse().map(e =>
+      vKids.push(el('div', { style: 'margin-top:6px' }, c.entries.slice().reverse().map(e =>
         el('div', { class: 'row' },
           el('span', { class: 'sub' }, (e.note || '—') + ' · ' + e.date.slice(5, 10)),
           el('span', { class: 'amount sub' }, '−' + eur(e.amount),
@@ -667,16 +682,16 @@ function renderMonth() {
         ))));
     }
   }
-  wrap.append(vCard);
+  wrap.append(collapsible('monthVariable', true, 'Varijabilno', null, vKids));
 
-  // Doprinosi loncima
-  const pcCard = el('div', { class: 'card' }, el('h2', {}, 'Uplate u lonce'));
+  // Uplate u štednju
+  const pcKids = [];
   for (const pc of M.potContribs) {
-    pcCard.append(checklineAmount(pc.paid, pc.name, pc.actual ?? pc.planned,
+    pcKids.push(checklineAmount(pc.paid, pc.name, pc.actual ?? pc.planned,
       (v) => { pc.paid = v; persist(); render(); },
       (amt) => { pc.actual = amt; persist(); render(); }));
   }
-  wrap.append(pcCard);
+  wrap.append(collapsible('monthPots', true, 'Uplate u štednju', null, pcKids));
 
   // Sinking računi koji dospijevaju
   if (M.potSpends.length) {
@@ -695,14 +710,16 @@ function renderMonth() {
   return wrap;
 }
 
-function checkline(checked, label, amount, onToggle) {
+function checkline(checked, label, amount, onToggle, onDelete) {
   const cb = el('input', { type: 'checkbox' });
   cb.checked = !!checked;
   cb.addEventListener('change', () => onToggle(cb.checked));
-  const line = el('label', { class: 'checkline' + (checked ? ' paid' : '') }, cb,
+  const line = el('label', { class: 'checkline' + (checked ? ' paid' : ''), style: onDelete ? 'flex:1' : '' }, cb,
     el('span', { class: 'label', style: 'flex:1' }, label),
     el('span', { class: 'amount' }, amount));
-  return line;
+  if (!onDelete) return line;
+  const del = el('button', { class: 'ghost', style: 'padding:2px 8px;flex:none', onclick: () => { if (confirm(`Ukloniti "${label}" iz ovog mjeseca? Ne dira postavke za buduće mjesece.`)) onDelete(); } }, '×');
+  return el('div', { style: 'display:flex;align-items:center;gap:4px' }, line, del);
 }
 
 /* Kao checkline, ali s uređivim iznosom (kad stvarni iznos odstupa od planiranog). */
@@ -719,7 +736,7 @@ function checklineAmount(checked, label, amountCents, onToggle, onAmount) {
     el('span', { class: 'label', style: 'flex:1' }, label), amt);
 }
 
-/* ---------- Lonci ---------- */
+/* ---------- Štednja ---------- */
 function renderPots() {
   const wrap = el('div');
   for (const p of state.pots) {
@@ -864,12 +881,31 @@ function startBalanceRow() {
 function startEdit(section, id) { settingsEdit = { section, id }; render(); }
 function cancelEdit() { settingsEdit = null; render(); }
 function isEditing(section, id) { return settingsEdit && settingsEdit.section === section && settingsEdit.id === id; }
-function editRow(label, section, id) {
+function editRow(label, section, id, extra) {
   return el('div', { class: 'row' },
     el('span', { class: 'label' }, label),
     el('span', {},
+      extra || null,
       el('button', { class: 'ghost', style: 'padding:2px 8px;margin-right:4px', onclick: () => startEdit(section, id) }, 'Uredi'),
       el('button', { class: 'ghost', style: 'padding:2px 8px', onclick: () => deleteSettingsItem(section, id) }, 'Obriši')));
+}
+/* Pretvara predložak fiksnog troška ↔ varijabilne kategorije (za buduće mjesece; već
+   otvoreni mjeseci ostaju nepromijenjeni, isto kao i svaka druga izmjena postavki). */
+function convertFixedToVariable(fixedId) {
+  const f = state.fixedCosts.find(x => x.id === fixedId);
+  if (!f) return;
+  if (!confirm(`Pretvoriti "${f.name}" iz fiksnog troška u varijabilnu kategoriju? Vrijedi od idućeg mjeseca nadalje.`)) return;
+  state.fixedCosts = state.fixedCosts.filter(x => x.id !== fixedId);
+  state.variableCategories.push({ id: 'var-' + uid(), name: f.name, plan: f.amount });
+  persist(); render();
+}
+function convertVariableToFixed(catId) {
+  const c = state.variableCategories.find(x => x.id === catId);
+  if (!c) return;
+  if (!confirm(`Pretvoriti "${c.name}" iz varijabilne kategorije u fiksni trošak? Vrijedi od idućeg mjeseca nadalje. Dan dospijeća postavi se na 1., možeš ga urediti odmah nakon pretvorbe.`)) return;
+  state.variableCategories = state.variableCategories.filter(x => x.id !== catId);
+  state.fixedCosts.push({ id: 'fx-' + uid(), name: c.name, amount: c.plan, day: 1, startMonth: null, endMonth: null });
+  persist(); render();
 }
 function deleteSettingsItem(section, id) {
   if (!confirm('Obrisati ovu stavku? Ne utječe na već otvorene mjesece, samo na buduće.')) return;
@@ -888,12 +924,12 @@ function field(label, inputEl) { return el('div', { class: 'field' }, el('label'
 
 /* --- Prihodi --- */
 function renderIncomeSettings() {
-  const card = el('div', { class: 'card' }, el('h2', {}, 'Prihodi (mjesečni)'));
+  const kids = [];
   for (const r of state.income.recurring) {
-    card.append(isEditing('income', r.id) ? incomeForm(r) : editRow(`${r.name} · ${eur(r.amount)} · ${r.day}. u mj.`, 'income', r.id));
+    kids.push(isEditing('income', r.id) ? incomeForm(r) : editRow(`${r.name} · ${eur(r.amount)} · ${r.day}. u mj.`, 'income', r.id));
   }
-  card.append(isEditing('income', null) ? incomeForm(null) : el('button', { class: 'ghost', onclick: () => startEdit('income', null) }, '+ Dodaj prihod'));
-  return card;
+  kids.push(isEditing('income', null) ? incomeForm(null) : el('button', { class: 'ghost', onclick: () => startEdit('income', null) }, '+ Dodaj prihod'));
+  return collapsible('settingsIncome', false, 'Prihodi (mjesečni)', null, kids);
 }
 function incomeForm(r) {
   const name = el('input', { type: 'text', value: r?.name ?? '', placeholder: 'npr. Plaća' });
@@ -911,13 +947,14 @@ function incomeForm(r) {
 
 /* --- Fiksni troškovi --- */
 function renderFixedSettings() {
-  const card = el('div', { class: 'card' }, el('h2', {}, 'Fiksni troškovi'));
+  const kids = [];
   for (const f of state.fixedCosts) {
     const label = `${f.name} · ${eur(f.amount)} · ${f.day}. u mj.${f.endMonth ? ' · do ' + f.endMonth : ''}${f.recurrence === 'annual' ? ' · godišnje' : ''}`;
-    card.append(isEditing('fixed', f.id) ? fixedForm(f) : editRow(label, 'fixed', f.id));
+    const toVar = el('button', { class: 'ghost', style: 'padding:2px 8px;margin-right:4px', onclick: () => convertFixedToVariable(f.id) }, '→ varijabilno');
+    kids.push(isEditing('fixed', f.id) ? fixedForm(f) : editRow(label, 'fixed', f.id, toVar));
   }
-  card.append(isEditing('fixed', null) ? fixedForm(null) : el('button', { class: 'ghost', onclick: () => startEdit('fixed', null) }, '+ Dodaj fiksni trošak'));
-  return card;
+  kids.push(isEditing('fixed', null) ? fixedForm(null) : el('button', { class: 'ghost', onclick: () => startEdit('fixed', null) }, '+ Dodaj fiksni trošak'));
+  return collapsible('settingsFixed', false, 'Fiksni troškovi', null, kids);
 }
 function fixedForm(f) {
   const name = el('input', { type: 'text', value: f?.name ?? '', placeholder: 'Naziv' });
@@ -950,12 +987,13 @@ function fixedForm(f) {
 
 /* --- Varijabilne kategorije --- */
 function renderVariableSettings() {
-  const card = el('div', { class: 'card' }, el('h2', {}, 'Varijabilne kategorije'));
+  const kids = [];
   for (const c of state.variableCategories) {
-    card.append(isEditing('variable', c.id) ? variableForm(c) : editRow(`${c.name} · plan ${eur(c.plan)}${c.analyze ? ' · analizira se' : ''}`, 'variable', c.id));
+    const toFixed = el('button', { class: 'ghost', style: 'padding:2px 8px;margin-right:4px', onclick: () => convertVariableToFixed(c.id) }, '→ fiksno');
+    kids.push(isEditing('variable', c.id) ? variableForm(c) : editRow(`${c.name} · plan ${eur(c.plan)}${c.analyze ? ' · analizira se' : ''}`, 'variable', c.id, toFixed));
   }
-  card.append(isEditing('variable', null) ? variableForm(null) : el('button', { class: 'ghost', onclick: () => startEdit('variable', null) }, '+ Dodaj kategoriju'));
-  return card;
+  kids.push(isEditing('variable', null) ? variableForm(null) : el('button', { class: 'ghost', onclick: () => startEdit('variable', null) }, '+ Dodaj kategoriju'));
+  return collapsible('settingsVariable', false, 'Varijabilne kategorije', null, kids);
 }
 function variableForm(c) {
   const name = el('input', { type: 'text', value: c?.name ?? '', placeholder: 'Naziv' });
@@ -973,14 +1011,14 @@ function variableForm(c) {
     formActions(save));
 }
 
-/* --- Lonci --- */
+/* --- Štednja --- */
 function renderPotsSettings() {
-  const card = el('div', { class: 'card' }, el('h2', {}, 'Lonci'));
+  const kids = [];
   for (const p of state.pots) {
-    card.append(isEditing('pots', p.id) ? potForm(p) : editRow(`${p.name} · ${eur(p.monthly)}/mj · ${p.type}${p.nextDue ? ' · dospijeće ' + monthName(p.nextDue) : ''}`, 'pots', p.id));
+    kids.push(isEditing('pots', p.id) ? potForm(p) : editRow(`${p.name} · ${eur(p.monthly)}/mj · ${p.type}${p.nextDue ? ' · dospijeće ' + monthName(p.nextDue) : ''}`, 'pots', p.id));
   }
-  card.append(isEditing('pots', null) ? potForm(null) : el('button', { class: 'ghost', onclick: () => startEdit('pots', null) }, '+ Dodaj lonac'));
-  return card;
+  kids.push(isEditing('pots', null) ? potForm(null) : el('button', { class: 'ghost', onclick: () => startEdit('pots', null) }, '+ Dodaj štednju'));
+  return collapsible('settingsPots', false, 'Štednja', null, kids);
 }
 function potForm(p) {
   const name = el('input', { type: 'text', value: p?.name ?? '', placeholder: 'Naziv' });
@@ -997,14 +1035,14 @@ function potForm(p) {
       p.name = n; p.type = t; p.monthly = m; p.startMonth = sm;
       if (t === 'sinking') {
         const tgt = parseEur(target.value), nd = nextDue.value.trim();
-        if (!tgt || !nd) return alert('Sinking lonac treba cilj i dospijeće (YYYY-MM).');
+        if (!tgt || !nd) return alert('Štednja tipa "sinking" treba cilj i dospijeće (YYYY-MM).');
         p.targetAmount = tgt; p.nextDue = nd;
       } else { delete p.targetAmount; delete p.nextDue; }
     } else {
       const obj = { id: 'pot-' + uid(), name: n, type: t, monthly: m, startMonth: sm };
       if (t === 'sinking') {
         const tgt = parseEur(target.value), nd = nextDue.value.trim();
-        if (!tgt || !nd) return alert('Sinking lonac treba cilj i dospijeće (YYYY-MM).');
+        if (!tgt || !nd) return alert('Štednja tipa "sinking" treba cilj i dospijeće (YYYY-MM).');
         obj.targetAmount = tgt; obj.nextDue = nd;
       }
       state.pots.push(obj);
