@@ -600,7 +600,7 @@ function renderDashboard() {
       dueThisWeek.map(d => row(`${d.name} (${d.day}. u mj.)`, eur(d.amount)))) : null,
   ));
 
-  wrap.append(el('button', { class: 'primary', onclick: openHonorarModal }, '+ Unesi honorar'));
+  wrap.append(el('button', { class: 'primary', onclick: () => openHonorarModal() }, '+ Unesi honorar'));
   return wrap;
 }
 
@@ -609,6 +609,30 @@ function row(label, amount, sub, amountClass) {
     el('span', { class: 'label' }, label, sub ? el('span', { class: 'sub' }, ' · ' + sub) : null),
     el('span', { class: 'amount' + (amountClass ? ' ' + amountClass : '') }, amount),
   );
+}
+
+/* Redak honorara u Mjesec → Prihodi, s gumbima za uređivanje/brisanje. */
+function honorarLine(h) {
+  const line = row(`Honorar → račun`, eur(h.toAccount), `ulaganja ${eur(h.toInvest)}`);
+  line.style.flex = '1';
+  const edit = el('button', { class: 'ghost', style: 'padding:2px 8px;flex:none', onclick: () => openHonorarModal(h) }, '✎');
+  const del = el('button', { class: 'ghost', style: 'padding:2px 8px;flex:none', onclick: () => { if (confirm(`Obrisati honorar (bruto ${eur(h.gross)})?`)) deleteHonorar(h); } }, '×');
+  return el('div', { style: 'display:flex;align-items:center;gap:4px' }, line, edit, del);
+}
+
+/* Uklanja honorar iz trenutnog mjeseca i pripadajući unos u "Ulaganja" (ako postoji). */
+function deleteHonorar(h) {
+  const M = state.months[currentMonth];
+  M.honorari = M.honorari.filter(x => x !== h);
+  if (h.toInvest > 0) {
+    const ulaganja = M.variable.find(v => v.catId === 'var-ulaganja');
+    if (ulaganja) {
+      const idx = h.investEntryId ? ulaganja.entries.findIndex(e => e.id === h.investEntryId)
+        : ulaganja.entries.findIndex(e => e.note === 'honorar' && e.amount === h.toInvest);
+      if (idx !== -1) ulaganja.entries.splice(idx, 1);
+    }
+  }
+  persist(); render();
 }
 
 /* Padajuća "card" sekcija. `key` pamti otvoreno/zatvoreno stanje (preživljava re-render).
@@ -647,7 +671,7 @@ function renderMonth() {
       (v) => { i.received = v; if (v && i.date == null) i.date = new Date().toISOString(); persist(); render(); },
       (amt) => { i.actual = amt; persist(); render(); }));
   }
-  for (const h of M.honorari) incKids.push(row(`Honorar → račun`, eur(h.toAccount), `ulaganja ${eur(h.toInvest)}`));
+  for (const h of M.honorari) incKids.push(honorarLine(h));
   wrap.append(collapsible('monthIncome', true, 'Prihodi', null, incKids));
 
   // Fiksni
@@ -1071,27 +1095,50 @@ function importJson() {
 }
 
 /* ---------- Honorar modal ---------- */
-function openHonorarModal() {
+/* Bez argumenta = novi honorar. S argumentom `existing` = uređivanje postojećeg. */
+function openHonorarModal(existing) {
   const gross = el('input', { type: 'text', inputmode: 'decimal', placeholder: '0,00' });
   const invest = el('input', { type: 'text', inputmode: 'decimal', placeholder: '0,00' });
+  if (existing) {
+    gross.value = (existing.gross / 100).toLocaleString('hr-HR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    invest.value = (existing.toInvest / 100).toLocaleString('hr-HR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  const save = () => {
+    const g = parseEur(gross.value), inv = Math.min(g, parseEur(invest.value));
+    if (!g) return closeModal();
+    const M = state.months[currentMonth];
+    const ulaganja = M.variable.find(v => v.catId === 'var-ulaganja');
+    if (existing) {
+      existing.gross = g; existing.toInvest = inv; existing.toAccount = g - inv;
+      let entry = ulaganja && existing.investEntryId ? ulaganja.entries.find(e => e.id === existing.investEntryId) : null;
+      if (!entry && ulaganja) entry = ulaganja.entries.find(e => e.note === 'honorar' && !M.honorari.some(o => o !== existing && o.investEntryId === e.id));
+      if (inv > 0 && ulaganja) {
+        if (entry) { entry.amount = inv; existing.investEntryId = entry.id; }
+        else { const ne = { id: uid(), amount: inv, note: 'honorar', date: new Date().toISOString() }; ulaganja.entries.push(ne); existing.investEntryId = ne.id; }
+      } else if (entry && ulaganja) {
+        ulaganja.entries = ulaganja.entries.filter(e => e !== entry);
+        existing.investEntryId = null;
+      }
+    } else {
+      const h = { id: uid(), gross: g, toInvest: inv, toAccount: g - inv, date: new Date().toISOString(), note: '', investEntryId: null };
+      M.honorari.push(h);
+      if (inv > 0 && ulaganja) {
+        const ne = { id: uid(), amount: inv, note: 'honorar', date: new Date().toISOString() };
+        ulaganja.entries.push(ne);
+        h.investEntryId = ne.id;
+      }
+    }
+    persist(); closeModal(); render();
+  };
   const modal = el('div', { class: 'modal' },
-    el('h3', {}, 'Unos honorara'),
+    el('h3', {}, existing ? 'Uredi honorar' : 'Unos honorara'),
     el('div', { class: 'field' }, el('label', {}, 'Bruto iznos honorara'), gross),
     el('div', { class: 'field' }, el('label', {}, 'Koliko ide u Ulaganja (T212)?'), invest),
     el('p', { class: 'notice' }, 'Ostatak se pribraja stanju računa.'),
     el('div', { class: 'actions' },
       el('button', { class: 'ghost', onclick: closeModal }, 'Odustani'),
-      el('button', { class: 'primary', onclick: () => {
-        const g = parseEur(gross.value), inv = Math.min(g, parseEur(invest.value));
-        if (!g) return closeModal();
-        const M = state.months[currentMonth];
-        M.honorari.push({ id: uid(), gross: g, toInvest: inv, toAccount: g - inv, date: new Date().toISOString(), note: '' });
-        if (inv > 0) {
-          const ulaganja = M.variable.find(v => v.catId === 'var-ulaganja');
-          ulaganja.entries.push({ id: uid(), amount: inv, note: 'honorar', date: new Date().toISOString() });
-        }
-        persist(); closeModal(); render();
-      } }, 'Spremi'),
+      existing ? el('button', { class: 'ghost', onclick: () => { if (confirm(`Obrisati honorar (bruto ${eur(existing.gross)})?`)) { deleteHonorar(existing); closeModal(); } } }, 'Obriši') : null,
+      el('button', { class: 'primary', onclick: save }, 'Spremi'),
     ),
   );
   showModal(modal);

@@ -103,6 +103,16 @@ mjesec) treba ručno kliknuti "×" na "Vrtić 2" u Mjesec → Fiksni troškovi (
 na stanje ako je stavka već bila označena plaćenom). Drugi vrtić se vjerojatno vraća
 od listopada/studenog 2026 — dodati naknadno kad se potvrdi.
 
+**2026-09-15:** Honorari u Mjesec → Prihodi sad imaju "✎" (uredi) i "×" (obriši) gumbe —
+ranije se pogrešno uneseni honorar nije mogao ispraviti ni maknuti (Nikola je slučajno
+dodao honorar 63 € i nije ga mogao vratiti). `openHonorarModal(existing)` s argumentom
+otvara uređivanje (predispunjeni iznosi, gumb "Obriši"); bez argumenta ostaje isto kao
+prije, novi unos. Honorar sad nosi `investEntryId` koji povezuje unos u "Ulaganja (T212)"
+generiran pri dijeljenju honorara — uređivanje/brisanje honorara automatski ažurira/makne
+i taj povezani unos (umjesto da ostane fantomski u Varijabilnom). Usput popravljen bug:
+gumb "+ Unesi honorar" je prosljeđivao klik-event izravno u `openHonorarModal` pa se
+znao otvoriti u "uredi" načinu s NaN vrijednostima.
+
 **Sljedeći korak:** sve iz v1 opsega (odjeljak 9) je gotovo. App radi na računalu i
 mobitelu, na javnoj adresi, sa Google Drive sinkronizacijom, uređivanjem postavki kroz UI
 i CSV izvozom. Preostaje samo (nije hitno): "Add to Home Screen" na mobitelu za pravi
